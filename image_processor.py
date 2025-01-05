@@ -297,7 +297,10 @@ class ImageProcessor:
     
     def calculate_compression_ratio(self, original_size: int, compressed_size: int) -> float:
         """Sıkıştırma oranını hesaplar."""
-        return (original_size - compressed_size) / original_size * 100
+        if original_size == 0:
+            return 0
+        # Sıkıştırma oranını doğrudan hesapla
+        return ((compressed_size / original_size) * 100)
     
     def analyze_all_methods(self, image: np.ndarray) -> Dict[str, Dict[str, List[float]]]:
         """Tüm sıkıştırma yöntemlerini analiz eder."""
@@ -336,7 +339,7 @@ class ImageProcessor:
     def find_optimal_method(self, results: dict) -> dict:
         """En iyi sıkıştırma yöntemini ve parametrelerini bulur."""
         best_overall = {'score': -float('inf')}
-        best_compression = {'compression_ratio': float('inf')}
+        best_compression = {'compression_ratio': -float('inf')}  # En yüksek sıkıştırma oranı en iyidir
         best_quality = {'quality_score': -float('inf')}
 
         for method, data in results.items():
@@ -351,7 +354,7 @@ class ImageProcessor:
                 quality_score = (psnr / 50.0) * 0.3 + ssim * 0.4 + (1 - lpips) * 0.3
                 
                 # Genel skor hesaplama (kalite ve sıkıştırma oranına göre)
-                compression_score = 1 - (compression_ratio / 100.0)  # Normalize edilmiş sıkıştırma oranı
+                compression_score = compression_ratio / 100.0  # Normalize edilmiş sıkıştırma oranı
                 overall_score = quality_score * 0.7 + compression_score * 0.3
 
                 # En iyi genel performans
@@ -366,8 +369,8 @@ class ImageProcessor:
                         'compression_ratio': compression_ratio
                     }
 
-                # En iyi sıkıştırma
-                if compression_ratio < best_compression['compression_ratio']:
+                # En iyi sıkıştırma (en yüksek sıkıştırma oranı)
+                if compression_ratio > best_compression['compression_ratio']:
                     best_compression = {
                         'method': method,
                         'quality': quality,
