@@ -11,6 +11,11 @@ from skimage.metrics import peak_signal_noise_ratio as psnr
 import os
 import time
 from PyQt5.QtCore import QThread, pyqtSignal, QWaitCondition, QMutex
+import zlib
+import gzip
+import bz2
+import lzma
+import psutil
 
 class VideoProcessor(QThread):
     progress_update = pyqtSignal(int)
@@ -43,6 +48,19 @@ class VideoProcessor(QThread):
         self.histogram_history = []
         self.entropy_history = []
         
+        # Metrik geçmişi
+        self.metrics_history = {
+            "PSNR": [],
+            "SSIM": [],
+            "LPIPS": [],
+            "Histogram_Similarity": [],
+            "Entropy": [],
+            "Compression_Ratio": [],
+            "Compression_Algorithm_Ratios": [],
+            "Compression_Algorithm_Times": [],
+            "Codec_Performance": []
+        }
+        
         # İşlem kontrol bayrakları
         self._stop = False
         self._pause = False
@@ -68,7 +86,8 @@ class VideoProcessor(QThread):
         fourcc = {
             "H.264": cv2.VideoWriter_fourcc(*'avc1'),
             "H.265/HEVC": cv2.VideoWriter_fourcc(*'hvc1'),
-            "VP9": cv2.VideoWriter_fourcc(*'VP90')
+            "MPEG-4": cv2.VideoWriter_fourcc(*'mp4v'),
+            "MJPEG": cv2.VideoWriter_fourcc(*'MJPG')  # Motion JPEG
         }[codec]
         
         self.writer = cv2.VideoWriter(
@@ -79,52 +98,49 @@ class VideoProcessor(QThread):
         )
     
     def calculate_frame_metrics(self, original: np.ndarray, compressed: np.ndarray) -> Dict[str, float]:
-        """Tek bir kare için kalite metriklerini hesaplar."""
-        # Görüntüleri aynı boyuta getir
-        if original.shape != compressed.shape:
-            compressed = cv2.resize(compressed, (original.shape[1], original.shape[0]))
-        
+        """Kare metriklerini hesaplar."""
         try:
-            # PSNR hesaplama
-            psnr_value = psnr(original, compressed)
+            # PSNR hesapla
+            psnr_value = cv2.PSNR(original, compressed)
             
-            # SSIM hesaplama - küçük görüntüler için win_size ayarı
-            min_dim = min(original.shape[0], original.shape[1])
-            if min_dim < 7:
-                win_size = min_dim if min_dim % 2 == 1 else min_dim - 1
-                ssim_value = ssim(original, compressed, channel_axis=2, win_size=win_size)
-            else:
-                ssim_value = ssim(original, compressed, channel_axis=2)
+            # SSIM hesapla
+            gray_original = cv2.cvtColor(original, cv2.COLOR_BGR2GRAY)
+            gray_compressed = cv2.cvtColor(compressed, cv2.COLOR_BGR2GRAY)
+            ssim_value = ssim(gray_original, gray_compressed)
             
-            # LPIPS hesaplama (algısal benzerlik)
-            with torch.no_grad():
-                # Görüntüleri PyTorch tensorlarına dönüştür
-                orig_tensor = torch.from_numpy(original).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                comp_tensor = torch.from_numpy(compressed).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-                
-                # GPU'ya taşı
-                orig_tensor = orig_tensor.to(self.device)
-                comp_tensor = comp_tensor.to(self.device)
-                
-                # LPIPS değerini hesapla
-                lpips_value = float(self.lpips_model(orig_tensor, comp_tensor).item())
+            # LPIPS hesapla
+            original_tensor = torch.from_numpy(original).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+            compressed_tensor = torch.from_numpy(compressed).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+            original_tensor = original_tensor.to(self.device)
+            compressed_tensor = compressed_tensor.to(self.device)
+            lpips_value = float(self.lpips_model(original_tensor, compressed_tensor))
             
-            # Histogram benzerliği hesaplama
+            # Histogram benzerliği hesapla
             hist_similarity = self.calculate_histogram_similarity(original, compressed)
+            
+            # Sıkıştırma oranı hesapla
+            _, original_encoded = cv2.imencode('.png', original)
+            _, compressed_encoded = cv2.imencode('.png', compressed)
+            compression_ratio = (1 - len(compressed_encoded) / len(original_encoded)) * 100
             
             return {
                 "PSNR": psnr_value,
                 "SSIM": ssim_value,
                 "LPIPS": lpips_value,
-                "Histogram_Similarity": hist_similarity
+                "Histogram_Similarity": hist_similarity,
+                "Compression_Ratio": compression_ratio
             }
+            
         except Exception as e:
             print(f"Metrik hesaplama hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return {
-                "PSNR": 0.0,
-                "SSIM": 0.0,
-                "LPIPS": 1.0,
-                "Histogram_Similarity": 0.0
+                "PSNR": 0,
+                "SSIM": 0,
+                "LPIPS": 1,
+                "Histogram_Similarity": 0,
+                "Compression_Ratio": 0
             }
     
     def calculate_histogram_similarity(self, img1: np.ndarray, img2: np.ndarray) -> float:
@@ -169,25 +185,184 @@ class VideoProcessor(QThread):
     
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict[str, float]]:
         """Tek bir kareyi işler ve sıkıştırır."""
-        # Kareyi sıkıştır
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100 - self.crf * 2]  # CRF'yi JPEG kalitesine dönüştür
-        _, encoded = cv2.imencode('.jpg', frame, encode_param)
-        compressed = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
-        
-        # Metrikleri hesapla
-        metrics = self.calculate_frame_metrics(frame, compressed)
-        
-        # Histogram ve entropi hesapla
-        self.calculate_histogram(frame)
-        entropy = self.calculate_entropy(frame)
-        metrics["Entropy"] = entropy
-        
-        return compressed, metrics
+        try:
+            # Kareyi sıkıştır
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100 - self.crf * 2]  # CRF'yi JPEG kalitesine dönüştür
+            _, encoded = cv2.imencode('.jpg', frame, encode_param)
+            compressed = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+            
+            # Temel metrikleri hesapla
+            metrics = self.calculate_frame_metrics(frame, compressed)
+            
+            # Histogram ve entropi hesapla
+            self.calculate_histogram(frame)
+            entropy = self.calculate_entropy(frame)
+            metrics["Entropy"] = entropy
+            
+            # Sıkıştırma algoritmaları performansı
+            frame_data = frame.tobytes()
+            original_size = len(frame_data)
+            
+            # Sıkıştırma algoritmaları için metrikler
+            algorithms = {
+                "zlib": zlib,
+                "gzip": gzip,
+                "bz2": bz2,
+                "lzma": lzma
+            }
+            
+            compression_metrics = {}
+            for name, algorithm in algorithms.items():
+                start_time = time.time()
+                start_mem = self.get_memory_usage()
+                
+                compressed_data = algorithm.compress(frame_data)
+                
+                end_time = time.time()
+                end_mem = self.get_memory_usage()
+                
+                compression_metrics[name] = {
+                    "ratio": (1 - len(compressed_data) / original_size) * 100,
+                    "time": end_time - start_time,
+                    "memory": end_mem - start_mem,
+                    "speed": (len(frame_data) / (1024 * 1024)) / (end_time - start_time) if (end_time - start_time) > 0 else 0
+                }
+            
+            metrics["Compression_Algorithms"] = compression_metrics
+            
+            # Codec performans analizi
+            codecs = {
+                "H.264": {"fourcc": 'avc1'},
+                "H.265/HEVC": {"fourcc": 'hvc1'},
+                "MPEG-4": {"fourcc": 'mp4v'},
+                "MJPEG": {"fourcc": 'MJPG'}
+            }
+            
+            codec_metrics = {}
+            for codec_name, params in codecs.items():
+                start_time = time.time()
+                start_mem = self.get_memory_usage()
+                
+                # Geçici dosyaya yazma
+                ext = '.avi' if codec_name == 'MJPEG' else '.mp4'
+                temp_filename = f"temp_{codec_name.lower().replace('/', '_')}{ext}"
+                
+                temp_writer = cv2.VideoWriter(
+                    temp_filename,
+                    cv2.VideoWriter_fourcc(*params["fourcc"]),
+                    30.0,
+                    (frame.shape[1], frame.shape[0])
+                )
+                
+                if temp_writer.isOpened():
+                    temp_writer.write(frame)
+                    temp_writer.release()
+                    
+                    end_time = time.time()
+                    end_mem = self.get_memory_usage()
+                    
+                    if os.path.exists(temp_filename):
+                        compressed_size = os.path.getsize(temp_filename)
+                        temp_cap = cv2.VideoCapture(temp_filename)
+                        ret, temp_frame = temp_cap.read()
+                        temp_cap.release()
+                        
+                        if ret:
+                            codec_metrics[codec_name] = {
+                                "ratio": (1 - compressed_size / original_size) * 100,
+                                "compression_ratio": (1 - compressed_size / original_size) * 100,
+                                "psnr": cv2.PSNR(frame, temp_frame),
+                                "ssim": ssim(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY),
+                                           cv2.cvtColor(temp_frame, cv2.COLOR_BGR2GRAY)),
+                                "time": end_time - start_time,
+                                "memory": end_mem - start_mem,
+                                "bitrate": (compressed_size * 8) / (1024 * 1024)  # Mbps
+                            }
+                        
+                        os.remove(temp_filename)
+            
+            metrics["Codec_Performance"] = codec_metrics
+            
+            # En iyi codec'i belirle
+            if codec_metrics:
+                best_codec = max(codec_metrics.items(),
+                               key=lambda x: (x[1]["ratio"] * 0.4 +
+                                            x[1]["psnr"] * 0.3 +
+                                            x[1]["ssim"] * 0.3))
+                metrics["Best_Codec"] = {
+                    "name": best_codec[0],
+                    "score": best_codec[1]["ratio"] * 0.4 +
+                             best_codec[1]["psnr"] * 0.3 +
+                             best_codec[1]["ssim"] * 0.3
+                }
+            else:
+                metrics["Best_Codec"] = {"name": "N/A", "score": 0}
+            
+            # En iyi sıkıştırma algoritmasını belirle
+            if compression_metrics:
+                best_algo = max(compression_metrics.items(),
+                              key=lambda x: x[1]["ratio"])
+                metrics["Best_Algorithm"] = {
+                    "name": best_algo[0],
+                    "compression_ratio": best_algo[1]["ratio"],
+                    "processing_time": best_algo[1]["time"],
+                    "memory_usage": best_algo[1]["memory"],
+                    "speed": best_algo[1]["speed"]
+                }
+            else:
+                metrics["Best_Algorithm"] = {
+                    "name": "N/A",
+                    "compression_ratio": 0,
+                    "processing_time": 0,
+                    "memory_usage": 0,
+                    "speed": 0
+                }
+            
+            return compressed, metrics
+            
+        except Exception as e:
+            print(f"Frame işleme hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return frame, {
+                "PSNR": 0,
+                "SSIM": 0,
+                "LPIPS": 1,
+                "Histogram_Similarity": 0,
+                "Entropy": 0,
+                "Compression_Ratio": 0,
+                "Compression_Algorithms": {},
+                "Codec_Performance": {},
+                "Best_Codec": {"name": "N/A", "score": 0},
+                "Best_Algorithm": {
+                    "name": "N/A",
+                    "compression_ratio": 0,
+                    "processing_time": 0,
+                    "memory_usage": 0,
+                    "speed": 0
+                }
+            }
     
     def stop(self):
         """Video işlemeyi durdurur."""
         self._stop = True
-        self._pause_condition.wakeAll()  # Duraklatılmışsa devam ettir ve durdur
+        self._pause = False  # Duraklatma durumunu da kaldır
+        self._pause_condition.wakeAll()  # Duraklatılmış thread'i uyandır
+        
+        try:
+            # Video yakalama ve yazma nesnelerini temizle
+            if hasattr(self, 'cap') and self.cap:
+                self.cap.release()
+            if hasattr(self, 'writer') and self.writer:
+                self.writer.release()
+            
+            # Grafikleri temizle
+            plt.close('all')
+            
+        except Exception as e:
+            print(f"Video durdurma hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def pause(self):
         """Video işlemeyi duraklatır."""
@@ -204,13 +379,18 @@ class VideoProcessor(QThread):
             self._stop = False
             self._pause = False
             self.start_time = time.time()
-            metrics_history = {
+            
+            # Metrik geçmişini sıfırla
+            self.metrics_history = {
                 "PSNR": [],
                 "SSIM": [],
                 "LPIPS": [],
                 "Histogram_Similarity": [],
                 "Entropy": [],
-                "Compression_Ratio": []
+                "Compression_Ratio": [],
+                "Compression_Algorithm_Ratios": [],
+                "Compression_Algorithm_Times": [],
+                "Codec_Performance": []
             }
             
             while self.cap.isOpened() and not self._stop:
@@ -235,12 +415,15 @@ class VideoProcessor(QThread):
                 
                 # Metrikleri kaydet
                 for key, value in metrics.items():
-                    metrics_history[key].append(value)
-                
-                # Sıkıştırma oranını hesapla
-                current_size = os.path.getsize(self.output_path) if os.path.exists(self.output_path) else 0
-                compression_ratio = self.calculate_compression_ratio(current_size)
-                metrics_history["Compression_Ratio"].append(compression_ratio)
+                    if key not in self.metrics_history:
+                        self.metrics_history[key] = []
+                    if key in ["Codec_Performance", "Compression_Algorithms"]:
+                        # Sözlük tipindeki metrikleri doğrudan ekle
+                        self.metrics_history[key] = value
+                    elif isinstance(value, (list, np.ndarray)):
+                        self.metrics_history[key].append(value)
+                    else:
+                        self.metrics_history[key].append(value)
                 
                 # GUI güncellemelerini gönder
                 self.processed_frames += 1
@@ -248,7 +431,7 @@ class VideoProcessor(QThread):
                 
                 self.progress_update.emit(progress)
                 self.frame_update.emit(frame, compressed)
-                self.metrics_update.emit(metrics_history)
+                self.metrics_update.emit(self.metrics_history)
                 
                 # Süre güncellemelerini gönder
                 remaining_time = self.estimate_remaining_time()
@@ -256,6 +439,8 @@ class VideoProcessor(QThread):
                 self.time_update.emit(remaining_time, processing_time)
                 
                 # Sıkıştırma oranı güncellemesini gönder
+                current_size = os.path.getsize(self.output_path) if os.path.exists(self.output_path) else 0
+                compression_ratio = self.calculate_compression_ratio(current_size)
                 self.compression_update.emit(compression_ratio)
             
             # Kaynakları temizle
@@ -496,23 +681,74 @@ class VideoProcessor(QThread):
     
     def get_compression_algorithm_ratios(self) -> List[float]:
         """Sıkıştırma algoritmaları için sıkıştırma oranlarını döndürür."""
-        # Bu fonksiyon gerçek veri toplanarak doldurulmalı
-        return [2.5, 2.3, 3.1, 3.5]  # Örnek değerler
+        frame_data = self.current_frame.tobytes() if hasattr(self, 'current_frame') else b''
+        original_size = len(frame_data)
+        ratios = []
+        
+        if original_size > 0:
+            for algorithm in [zlib, gzip, bz2, lzma]:
+                compressed = algorithm.compress(frame_data)
+                ratio = (1 - len(compressed) / original_size) * 100
+                ratios.append(ratio)
+        else:
+            ratios = [0, 0, 0, 0]
+            
+        return ratios
     
     def get_compression_algorithm_times(self) -> List[float]:
         """Sıkıştırma algoritmaları için işlem sürelerini döndürür."""
-        # Bu fonksiyon gerçek veri toplanarak doldurulmalı
-        return [0.5, 0.6, 1.2, 2.0]  # Örnek değerler
+        frame_data = self.current_frame.tobytes() if hasattr(self, 'current_frame') else b''
+        times = []
+        
+        if len(frame_data) > 0:
+            for algorithm in [zlib, gzip, bz2, lzma]:
+                start_time = time.time()
+                algorithm.compress(frame_data)
+                times.append(time.time() - start_time)
+        else:
+            times = [0, 0, 0, 0]
+            
+        return times
     
     def get_compression_algorithm_memory(self) -> List[float]:
         """Sıkıştırma algoritmaları için bellek kullanımını döndürür."""
-        # Bu fonksiyon gerçek veri toplanarak doldurulmalı
-        return [50, 55, 80, 120]  # Örnek değerler
+        frame_data = self.current_frame.tobytes() if hasattr(self, 'current_frame') else b''
+        memory_usage = []
+        
+        if len(frame_data) > 0:
+            for algorithm in [zlib, gzip, bz2, lzma]:
+                # Bellek kullanımını ölç
+                start_mem = self.get_memory_usage()
+                algorithm.compress(frame_data)
+                end_mem = self.get_memory_usage()
+                memory_usage.append(end_mem - start_mem)
+        else:
+            memory_usage = [0, 0, 0, 0]
+            
+        return memory_usage
     
     def get_compression_algorithm_speed(self) -> List[float]:
         """Sıkıştırma algoritmaları için sıkıştırma hızını döndürür."""
-        # Bu fonksiyon gerçek veri toplanarak doldurulmalı
-        return [100, 90, 60, 30]  # Örnek değerler
+        frame_data = self.current_frame.tobytes() if hasattr(self, 'current_frame') else b''
+        data_size_mb = len(frame_data) / (1024 * 1024)  # MB cinsinden
+        speeds = []
+        
+        if data_size_mb > 0:
+            for algorithm in [zlib, gzip, bz2, lzma]:
+                start_time = time.time()
+                algorithm.compress(frame_data)
+                elapsed_time = time.time() - start_time
+                speed = data_size_mb / elapsed_time if elapsed_time > 0 else 0
+                speeds.append(speed)
+        else:
+            speeds = [0, 0, 0, 0]
+            
+        return speeds
+    
+    def get_memory_usage(self) -> float:
+        """Mevcut işlemin bellek kullanımını MB cinsinden döndürür."""
+        process = psutil.Process()
+        return process.memory_info().rss / (1024 * 1024)  # MB cinsinden
     
     def estimate_remaining_time(self) -> float:
         """Kalan süreyi tahmin eder."""
@@ -529,5 +765,4 @@ class VideoProcessor(QThread):
         """Anlık sıkıştırma oranını hesaplar."""
         if self.original_size == 0:
             return 0
-        # 100'den çıkararak gerçek sıkıştırma oranını hesapla
         return 100 - ((current_size / self.original_size) * 100) 
