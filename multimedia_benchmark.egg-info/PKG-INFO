@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: multimedia_benchmark
+Version: 0.1
+Requires-Dist: numpy
+Requires-Dist: opencv-python
+Requires-Dist: colorama
