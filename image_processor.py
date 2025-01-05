@@ -20,6 +20,22 @@ class ImageProcessor:
         self.compression_methods = ["JPEG", "JPEG2000", "HEVC"]
         self.quality_range = range(10, 101, 10)
         self.jp2_compression_rates = [4, 8, 16, 32, 64, 128, 256]
+        # LPIPS modelini başlangıçta yükle
+        self.initialize_lpips()
+    
+    def initialize_lpips(self):
+        """LPIPS modelini yükler."""
+        try:
+            import lpips
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning)
+                self._lpips_model = lpips.LPIPS(net='alex', verbose=False)
+                if torch.cuda.is_available():
+                    self._lpips_model = self._lpips_model.cuda()
+                print("LPIPS modeli başarıyla yüklendi.")
+        except Exception as e:
+            print(f"LPIPS modeli yüklenirken hata oluştu: {str(e)}")
+            self._lpips_model = None
     
     @property
     def device(self):
@@ -37,8 +53,19 @@ class ImageProcessor:
     
     def load_image(self, path: str) -> np.ndarray:
         """Görüntüyü yükler ve BGR formatında döndürür."""
-        self.original_size = os.path.getsize(path)
-        return cv2.imread(path)
+        try:
+            # Dosya boyutunu kaydet
+            self.original_size = os.path.getsize(path)
+            print(f"Orijinal dosya boyutu: {self.original_size} bytes")
+            
+            # Görüntüyü oku
+            image = cv2.imread(path)
+            if image is None:
+                raise Exception(f"Görüntü okunamadı: {path}")
+            return image
+        except Exception as e:
+            print(f"Görüntü yükleme hatası: {str(e)}")
+            raise
     
     def convert_color_space(self, image: np.ndarray, target_space: str) -> np.ndarray:
         """Görüntüyü hedef renk uzayına dönüştürür."""
@@ -56,30 +83,45 @@ class ImageProcessor:
         try:
             metrics = {}
             
-            # Temel metrikler (her zaman hesaplanır)
+            # Temel metrikler
             mse = np.mean((original.astype(float) - compressed.astype(float)) ** 2)
             metrics["MSE"] = mse
-            
             metrics["PSNR"] = float('inf') if mse == 0 else 20 * np.log10(255.0 / np.sqrt(mse))
             metrics["SSIM"] = ssim(original, compressed, channel_axis=2, data_range=255)
             
-            # LPIPS sadece gerektiğinde hesaplanır
+            # LPIPS hesaplama
             if self._lpips_model is not None:
-                if len(original.shape) == 3 and original.shape[2] == 3:
+                try:
+                    # BGR'dan RGB'ye dönüştür
                     orig_rgb = cv2.cvtColor(original, cv2.COLOR_BGR2RGB)
                     comp_rgb = cv2.cvtColor(compressed, cv2.COLOR_BGR2RGB)
-                else:
-                    orig_rgb = original
-                    comp_rgb = compressed
-                
-                orig_tensor = torch.from_numpy(orig_rgb).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
-                comp_tensor = torch.from_numpy(comp_rgb).permute(2, 0, 1).unsqueeze(0).float() / 127.5 - 1
-                orig_tensor = orig_tensor.to(self.device)
-                comp_tensor = comp_tensor.to(self.device)
-                
-                metrics["LPIPS"] = float(self.lpips_model(orig_tensor, comp_tensor).item())
+                    
+                    # Görüntüleri normalize et [-1, 1] aralığına
+                    orig_tensor = torch.from_numpy(orig_rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0 * 2 - 1
+                    comp_tensor = torch.from_numpy(comp_rgb).float().permute(2, 0, 1).unsqueeze(0) / 255.0 * 2 - 1
+                    
+                    # GPU'ya taşı (eğer varsa)
+                    if torch.cuda.is_available():
+                        orig_tensor = orig_tensor.cuda()
+                        comp_tensor = comp_tensor.cuda()
+                    
+                    # LPIPS hesapla
+                    with torch.no_grad():
+                        lpips_value = float(self._lpips_model(orig_tensor, comp_tensor).item())
+                        print(f"LPIPS değeri hesaplandı: {lpips_value}")
+                        metrics["LPIPS"] = lpips_value
+                except Exception as e:
+                    print(f"LPIPS hesaplama hatası: {str(e)}")
+                    metrics["LPIPS"] = 1.0
             else:
-                metrics["LPIPS"] = 1.0
+                print("LPIPS modeli yüklenmemiş! Model yükleniyor...")
+                self.initialize_lpips()
+                if self._lpips_model is not None:
+                    # Modeli yükledikten sonra tekrar dene
+                    return self.calculate_metrics(original, compressed)
+                else:
+                    print("LPIPS modeli yüklenemedi!")
+                    metrics["LPIPS"] = 1.0
             
             return metrics
             
@@ -339,7 +381,7 @@ class ImageProcessor:
     def find_optimal_method(self, results: dict) -> dict:
         """En iyi sıkıştırma yöntemini ve parametrelerini bulur."""
         best_overall = {'score': -float('inf')}
-        best_compression = {'compression_ratio': -float('inf')}  # En yüksek sıkıştırma oranı en iyidir
+        best_compression = {'compression_ratio': -float('inf')}
         best_quality = {'quality_score': -float('inf')}
 
         for method, data in results.items():
@@ -347,14 +389,15 @@ class ImageProcessor:
                 # Kalite metrikleri
                 psnr = data['psnr_values'][i]
                 ssim = data['ssim_values'][i]
-                lpips = data['lpips_values'][i]
+                lpips = data['lpips_values'][i]  # 0 = benzer, 1 = farklı
                 compression_ratio = data['compression_ratios'][i]
                 
                 # Kalite skoru hesaplama (PSNR, SSIM ve LPIPS'e göre)
-                quality_score = (psnr / 50.0) * 0.3 + ssim * 0.4 + (1 - lpips) * 0.3
+                # LPIPS için 1'den çıkarıyoruz çünkü 0 benzer, 1 farklı anlamına geliyor
+                quality_score = (psnr / 50.0) * 0.3 + ssim * 0.4 + (1.0 - lpips) * 0.3
                 
                 # Genel skor hesaplama (kalite ve sıkıştırma oranına göre)
-                compression_score = compression_ratio / 100.0  # Normalize edilmiş sıkıştırma oranı
+                compression_score = compression_ratio / 100.0  # Yüksek oran daha iyi
                 overall_score = quality_score * 0.7 + compression_score * 0.3
 
                 # En iyi genel performans
@@ -479,3 +522,31 @@ class ImageProcessor:
         ax2.grid(True)
         
         return fig1, fig2 
+    
+    def compress_and_analyze(self, image: np.ndarray, method: str, quality: int) -> Tuple[np.ndarray, Dict[str, float]]:
+        """Görüntüyü sıkıştırır ve metrikleri hesaplar."""
+        try:
+            # Görüntüyü sıkıştır
+            compressed, file_size = self.compress_image(image, method, quality)
+            
+            # Metrikleri hesapla
+            metrics = self.calculate_metrics(image, compressed)
+            
+            # Metriklere ek bilgileri ekle
+            metrics.update({
+                'method': method,
+                'quality': quality,
+                'file_size': file_size,
+                'original_size': self.original_size,
+                'compression_ratio': self.calculate_compression_ratio(self.original_size, file_size)
+            })
+            
+            print(f"Orijinal boyut: {self.original_size} bytes")
+            print(f"Sıkıştırılmış boyut: {file_size} bytes")
+            print(f"Sıkıştırma oranı: {metrics['compression_ratio']}%")
+            
+            return compressed, metrics
+            
+        except Exception as e:
+            print(f"Sıkıştırma ve analiz sırasında hata: {str(e)}")
+            raise 

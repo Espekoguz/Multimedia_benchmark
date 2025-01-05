@@ -494,48 +494,16 @@ class MultimediaBenchmark(QMainWindow):
         label.setPixmap(pixmap.scaled(label.size(), Qt.KeepAspectRatio))
     
     def compress_and_analyze(self):
-        """Görüntüyü sıkıştırır ve metrikleri hesaplar."""
-        print("Sıkıştırma ve analiz başlatılıyor...")
-        
-        if not hasattr(self, 'original_image'):
-            print("Hata: Görüntü yüklenmemiş!")
-            return
-        
-        if self.original_image is None:
-            print("Hata: Görüntü geçersiz!")
-            return
-            
+        """Görüntüyü sıkıştırır ve analiz eder."""
         try:
-            print("Sıkıştırma parametreleri alınıyor...")
-            # Sıkıştırma parametreleri
+            print("Sıkıştırma başlıyor...")
             method = self.image_compression_combo.currentText()
             quality = self.image_quality_spin.value()
             
-            print(f"Görüntü sıkıştırılıyor... (Yöntem: {method}, Kalite: {quality})")
-            # Görüntüyü sıkıştır
-            compressed, file_size = self.image_processor.compress_image(
-                self.original_image, method, quality)
-            
-            if compressed is None:
-                print("Hata: Sıkıştırma başarısız!")
-                return
-            
-            print("Metrikler hesaplanıyor...")
-            # Metrikleri hesapla
-            metrics = self.image_processor.calculate_metrics(
-                self.original_image, compressed)
-            
-            # Sıkıştırma oranını hesapla
-            compression_ratio = self.image_processor.calculate_compression_ratio(
-                self.image_processor.original_size, file_size)
-            
-            # Metrikleri güncelle
-            metrics.update({
-                "compression_ratio": compression_ratio,
-                "file_size": file_size,
-                "method": method,
-                "quality": quality
-            })
+            # Sıkıştırma ve analiz
+            compressed, metrics = self.image_processor.compress_and_analyze(
+                self.original_image, method, quality
+            )
             
             print("Arayüz güncelleniyor...")
             # Metrikleri göster
@@ -566,19 +534,22 @@ class MultimediaBenchmark(QMainWindow):
             import traceback
             traceback.print_exc()
             self.metrics_label.setText(f"İşlem sırasında hata oluştu: {str(e)}")
-            self.recommendation_label.setText("İşlem sırasında hata oluştu")
     
     def update_metrics_label(self, metrics: dict):
         """Metrik etiketini günceller."""
         text = f"""
         <table style='color: #ECF0F1;'>
+            <tr><td colspan='2' style='text-align:center;'><b>Sıkıştırma Bilgileri</b></td></tr>
             <tr><td><b>Yöntem:</b></td><td>{metrics.get('method', 'N/A')}</td></tr>
             <tr><td><b>Kalite:</b></td><td>{metrics.get('quality', 0)}</td></tr>
+            <tr><td colspan='2' style='text-align:center;'><b>Dosya Boyutları</b></td></tr>
+            <tr><td><b>Orijinal:</b></td><td>{metrics.get('original_size', 0)/1024:.2f} KB</td></tr>
+            <tr><td><b>Sıkıştırılmış:</b></td><td>{metrics.get('file_size', 0)/1024:.2f} KB</td></tr>
             <tr><td><b>Sıkıştırma Oranı:</b></td><td>{metrics.get('compression_ratio', 0):.2f}%</td></tr>
-            <tr><td><b>Dosya Boyutu:</b></td><td>{metrics.get('file_size', 0)/1024:.2f} KB</td></tr>
+            <tr><td colspan='2' style='text-align:center;'><b>Kalite Metrikleri</b></td></tr>
             <tr><td><b>PSNR:</b></td><td>{metrics.get('PSNR', 0):.2f} dB</td></tr>
             <tr><td><b>SSIM:</b></td><td>{metrics.get('SSIM', 0):.4f}</td></tr>
-            <tr><td><b>LPIPS:</b></td><td>{metrics.get('LPIPS', 1):.4f}</td></tr>
+            <tr><td><b>LPIPS:</b></td><td>{metrics.get('LPIPS', 0):.4f}</td></tr>
         </table>
         """
         self.metrics_label.setText(text)
@@ -601,7 +572,7 @@ class MultimediaBenchmark(QMainWindow):
             <tr><td>Sıkıştırma Oranı:</td><td>{best_overall.get('compression_ratio', 0):.2f}%</td></tr>
             <tr><td>PSNR:</td><td>{best_overall.get('psnr', 0):.2f} dB</td></tr>
             <tr><td>SSIM:</td><td>{best_overall.get('ssim', 0):.4f}</td></tr>
-            <tr><td>LPIPS:</td><td>{best_overall.get('lpips', 1):.4f}</td></tr>
+            <tr><td>LPIPS:</td><td>{best_overall.get('lpips', 0):.4f}</td></tr>
 
             <tr><td colspan='2'><b>En İyi Sıkıştırma:</b></td></tr>
             <tr><td>Yöntem:</td><td>{best_compression.get('method', 'N/A')}</td></tr>
@@ -613,7 +584,7 @@ class MultimediaBenchmark(QMainWindow):
             <tr><td>Kalite:</td><td>{best_quality.get('quality', 0)}</td></tr>
             <tr><td>PSNR:</td><td>{best_quality.get('psnr', 0):.2f} dB</td></tr>
             <tr><td>SSIM:</td><td>{best_quality.get('ssim', 0):.4f}</td></tr>
-            <tr><td>LPIPS:</td><td>{best_quality.get('lpips', 1):.4f}</td></tr>
+            <tr><td>LPIPS:</td><td>{best_quality.get('lpips', 0):.4f}</td></tr>
         </table>
         """
         self.recommendation_label.setText(text)
