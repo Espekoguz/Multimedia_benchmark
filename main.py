@@ -172,17 +172,10 @@ class MultimediaBenchmark(QMainWindow):
         # Plot penceresi
         self.plot_window = None
         
-        # Plot canvas'ları
-        self.plot_canvases = {}
-        
         # Ana widget ve layout
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
-        
-        # Plot sekmelerini oluştur
-        self.plot_tabs = QTabWidget()
-        self.layout.addWidget(self.plot_tabs)
         
         # Üst panel - Kontroller
         top_panel = QHBoxLayout()
@@ -315,6 +308,7 @@ class MultimediaBenchmark(QMainWindow):
         metrics_panel.addWidget(self.metrics_label)
         
         # Anlık en iyi değerler etiketi
+        self.current_best_label_title = QLabel("Anlık En İyi Değerler:")
         self.current_best_label = QLabel()
         self.current_best_label.setStyleSheet("""
             QLabel { 
@@ -326,8 +320,11 @@ class MultimediaBenchmark(QMainWindow):
                 font-weight: bold;
             }
         """)
-        metrics_panel.addWidget(QLabel("Anlık En İyi Değerler:"))
+        metrics_panel.addWidget(self.current_best_label_title)
         metrics_panel.addWidget(self.current_best_label)
+        # Başlangıçta gizle
+        self.current_best_label_title.setVisible(False)
+        self.current_best_label.setVisible(False)
         
         # Önerilen yöntem etiketi
         self.recommendation_label = QLabel()
@@ -347,6 +344,9 @@ class MultimediaBenchmark(QMainWindow):
         middle_panel.addLayout(metrics_panel)
         
         self.layout.addLayout(middle_panel)
+        
+        # Buton layout'u
+        button_layout = QHBoxLayout()
         
         # Grafik göster butonu
         show_plots_btn = QPushButton("Grafikleri Göster")
@@ -380,8 +380,6 @@ class MultimediaBenchmark(QMainWindow):
             }
         """)
         
-        # Buton layout'u
-        button_layout = QHBoxLayout()
         button_layout.addWidget(show_plots_btn)
         button_layout.addWidget(fullscreen_btn)
         button_layout.addStretch()
@@ -395,34 +393,8 @@ class MultimediaBenchmark(QMainWindow):
         self.video_processor.compression_update.connect(self.update_compression)
         self.video_processor.finished.connect(self.on_video_processing_finished)
         
-        self.setup_plot_tabs()
         self.show()
 
-    def setup_plot_tabs(self):
-        """Grafik sekmelerini oluşturur."""
-        # Mevcut sekmeleri temizle
-        while self.plot_tabs.count() > 0:
-            self.plot_tabs.removeTab(0)
-        
-        # Görüntü grafiklerini ekle
-        plot_tabs = {
-            "compression": "Sıkıştırma Analizi",
-            "psnr": "PSNR Analizi",
-            "ssim": "SSIM Analizi",
-            "time": "Süre Analizi"
-        }
-        
-        for key, title in plot_tabs.items():
-            container = QWidget()
-            layout = QVBoxLayout(container)
-            
-            # Canvas ve figure oluştur
-            canvas, figure = self.plot_manager.create_canvas()
-            layout.addWidget(canvas)
-            
-            self.plot_tabs.addTab(container, title)
-            self.plot_canvases[key] = canvas
-    
     def show_plots(self):
         """Grafik penceresini gösterir."""
         if self.plot_window is None:
@@ -456,9 +428,11 @@ class MultimediaBenchmark(QMainWindow):
             # Görüntü ayarlarını göster, video ayarlarını gizle
             self.image_settings.show()
             self.video_settings.hide()
-            # İlerleme çubuğunu ve süre etiketini gizle
+            # İlerleme çubuğunu, süre etiketini ve en iyi değerler etiketini gizle
             self.progress_bar.setVisible(False)
             self.time_label.setVisible(False)
+            self.current_best_label.setVisible(False)
+            self.current_best_label_title.setVisible(False)
             # Görüntü grafiklerini göster
             self.show_image_plots()
     
@@ -476,9 +450,11 @@ class MultimediaBenchmark(QMainWindow):
             # Video ayarlarını göster, görüntü ayarlarını gizle
             self.video_settings.show()
             self.image_settings.hide()
-            # İlerleme çubuğunu ve süre etiketini göster
+            # İlerleme çubuğunu, süre etiketini ve en iyi değerler etiketini göster
             self.progress_bar.setVisible(True)
             self.time_label.setVisible(True)
+            self.current_best_label.setVisible(True)
+            self.current_best_label_title.setVisible(True)
             
             # Video işleme parametrelerini ayarla
             output_path = file_name.rsplit('.', 1)[0] + '_compressed.' + file_name.rsplit('.', 1)[1]
@@ -490,25 +466,22 @@ class MultimediaBenchmark(QMainWindow):
     
     def show_image_plots(self):
         """Görüntü grafiklerini gösterir."""
-        # Mevcut sekmeleri temizle
-        while self.plot_tabs.count() > 0:
-            self.plot_tabs.removeTab(0)
-        
-        # Görüntü grafiklerini ekle
-        plot_tabs = {
-            "compression": "Sıkıştırma Analizi",
-            "psnr": "PSNR Analizi",
-            "ssim": "SSIM Analizi",
-            "time": "Süre Analizi"
-        }
-        
-        for key, title in plot_tabs.items():
-            container = QWidget()
-            layout = QVBoxLayout(container)
-            canvas = self.plot_manager.FigureCanvas(self.plot_manager.plt.figure(figsize=(8, 5)))
-            layout.addWidget(canvas)
-            self.plot_tabs.addTab(container, title)
-            self.plot_canvases[key] = canvas
+        if hasattr(self, 'original_image') and self.original_image is not None:
+            try:
+                # Plot penceresini oluştur veya mevcut pencereyi kullan
+                if self.plot_window is None:
+                    self.plot_window = PlotWindow(self)
+                    self.plot_window.plot_manager = self.plot_manager
+                    self.plot_window.setup_plot_tabs()
+                
+                # Analiz yap ve grafikleri güncelle
+                results = self.image_processor.analyze_all_methods(self.original_image)
+                self.plot_window.update_plots(results)
+                
+            except Exception as e:
+                print(f"Grafik güncelleme hatası: {str(e)}")
+                import traceback
+                traceback.print_exc()
     
     def display_image(self, image: np.ndarray, label: QLabel):
         """Numpy dizisini QLabel'da görüntüler."""
