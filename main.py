@@ -71,6 +71,9 @@ class PlotWindow(QMainWindow):
             "Codec_Performance": []
         }
         
+        # Codec skorları
+        self.codec_scores = {}
+        
         # Görüntü/Video modu
         self.mode = None  # 'image' veya 'video'
     
@@ -239,33 +242,19 @@ class PlotWindow(QMainWindow):
                     ax2.set_ylabel("Süre (s)")
                     ax2.grid(True, alpha=0.3)
                     
-                    # Bellek Kullanımı
+                    # Sıkıştırma Hızı
                     ax3 = canvas.figure.add_subplot(gs[1, 0])
-                    memory = [compression_metrics.get(algo, {}).get("memory", 0) for algo in algorithms]
-                    bars = ax3.bar(x, memory, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
+                    speed = [compression_metrics.get(algo, {}).get("speed", 0) for algo in algorithms]
+                    bars = ax3.bar(x, speed, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
                     for bar in bars:
                         height = bar.get_height()
                         ax3.text(bar.get_x() + bar.get_width()/2., height,
-                                f'{height:.0f}MB', ha='center', va='bottom')
+                                f'{height:.0f}MB/s', ha='center', va='bottom')
                     ax3.set_xticks(x)
                     ax3.set_xticklabels(algorithms)
-                    ax3.set_title("Sıkıştırma Algoritmaları - Bellek Kullanımı")
-                    ax3.set_ylabel("Bellek (MB)")
+                    ax3.set_title("Sıkıştırma Algoritmaları - Sıkıştırma Hızı")
+                    ax3.set_ylabel("MB/s")
                     ax3.grid(True, alpha=0.3)
-                    
-                    # Sıkıştırma Hızı
-                    ax4 = canvas.figure.add_subplot(gs[1, 1])
-                    speed = [compression_metrics.get(algo, {}).get("speed", 0) for algo in algorithms]
-                    bars = ax4.bar(x, speed, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
-                    for bar in bars:
-                        height = bar.get_height()
-                        ax4.text(bar.get_x() + bar.get_width()/2., height,
-                                f'{height:.0f}MB/s', ha='center', va='bottom')
-                    ax4.set_xticks(x)
-                    ax4.set_xticklabels(algorithms)
-                    ax4.set_title("Sıkıştırma Algoritmaları - Sıkıştırma Hızı")
-                    ax4.set_ylabel("MB/s")
-                    ax4.grid(True, alpha=0.3)
                 
                 canvas.figure.tight_layout()
                 canvas.draw()
@@ -282,35 +271,46 @@ class PlotWindow(QMainWindow):
                     codecs = list(codec_metrics.keys())
                     x = range(len(codecs))
                     
-                    # PSNR vs Bitrate
+                    # PSNR Karşılaştırması
                     ax1 = canvas.figure.add_subplot(gs[0, 0])
-                    for codec in codecs:
-                        if codec in codec_metrics:
-                            ax1.plot([codec_metrics[codec].get("bitrate", 0)], 
-                                   [codec_metrics[codec].get("psnr", 0)], 
-                                   marker='o', label=codec, linewidth=2)
-                    ax1.set_title("PSNR vs Bitrate")
-                    ax1.set_xlabel("Bitrate (Mbps)")
+                    psnr_values = [codec_metrics[codec].get("psnr", 0) for codec in codecs]
+                    # En yüksek PSNR en iyi
+                    max_psnr = max(psnr_values) if psnr_values else 1
+                    psnr_scores = [v/max_psnr for v in psnr_values]  # Yüksek olan yüksek skor alır
+                    bars = ax1.bar(x, psnr_values, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
+                    for bar in bars:
+                        height = bar.get_height()
+                        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                                f'{height:.2f}dB', ha='center', va='bottom')
+                    ax1.set_xticks(x)
+                    ax1.set_xticklabels(codecs)
+                    ax1.set_title("Codec PSNR Karşılaştırması")
                     ax1.set_ylabel("PSNR (dB)")
-                    ax1.grid(True)
-                    ax1.legend()
+                    ax1.grid(True, alpha=0.3)
                     
-                    # SSIM vs Bitrate
+                    # SSIM Karşılaştırması
                     ax2 = canvas.figure.add_subplot(gs[0, 1])
-                    for codec in codecs:
-                        if codec in codec_metrics:
-                            ax2.plot([codec_metrics[codec].get("bitrate", 0)], 
-                                   [codec_metrics[codec].get("ssim", 0)], 
-                                   marker='o', label=codec, linewidth=2)
-                    ax2.set_title("SSIM vs Bitrate")
-                    ax2.set_xlabel("Bitrate (Mbps)")
+                    ssim_values = [codec_metrics[codec].get("ssim", 0) for codec in codecs]
+                    # En yüksek SSIM en iyi
+                    max_ssim = max(ssim_values) if ssim_values else 1
+                    ssim_scores = [v/max_ssim for v in ssim_values]  # Yüksek olan yüksek skor alır
+                    bars = ax2.bar(x, ssim_values, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
+                    for bar in bars:
+                        height = bar.get_height()
+                        ax2.text(bar.get_x() + bar.get_width()/2., height,
+                                f'{height:.4f}', ha='center', va='bottom')
+                    ax2.set_xticks(x)
+                    ax2.set_xticklabels(codecs)
+                    ax2.set_title("Codec SSIM Karşılaştırması")
                     ax2.set_ylabel("SSIM")
-                    ax2.grid(True)
-                    ax2.legend()
+                    ax2.grid(True, alpha=0.3)
                     
                     # Sıkıştırma Oranı
                     ax3 = canvas.figure.add_subplot(gs[1, 0])
                     ratios = [codec_metrics[codec].get("ratio", 0) for codec in codecs]
+                    # En düşük oran en iyi
+                    min_ratio = min(ratios) if ratios else 1
+                    ratio_scores = [min_ratio/v if v != 0 else 0 for v in ratios]  # Düşük olan yüksek skor alır
                     bars = ax3.bar(x, ratios, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
                     for bar in bars:
                         height = bar.get_height()
@@ -320,11 +320,14 @@ class PlotWindow(QMainWindow):
                     ax3.set_xticklabels(codecs)
                     ax3.set_title("Codec Sıkıştırma Oranları")
                     ax3.set_ylabel("Sıkıştırma Oranı (%)")
-                    ax3.grid(True)
+                    ax3.grid(True, alpha=0.3)
                     
                     # İşlem Süresi
                     ax4 = canvas.figure.add_subplot(gs[1, 1])
                     times = [codec_metrics[codec].get("time", 0) for codec in codecs]
+                    # En düşük süre en iyi
+                    min_time = min(times) if times else 1
+                    time_scores = [min_time/v if v != 0 else 0 for v in times]
                     bars = ax4.bar(x, times, color=['#3498db', '#2ecc71', '#e74c3c', '#f1c40f'])
                     for bar in bars:
                         height = bar.get_height()
@@ -334,7 +337,33 @@ class PlotWindow(QMainWindow):
                     ax4.set_xticklabels(codecs)
                     ax4.set_title("Codec İşlem Süreleri")
                     ax4.set_ylabel("Süre (s)")
-                    ax4.grid(True)
+                    ax4.grid(True, alpha=0.3)
+                    
+                    # Her codec için toplam skoru hesapla
+                    total_scores = {}
+                    individual_scores = {}
+                    for i, codec in enumerate(codecs):
+                        individual_scores[codec] = {
+                            'PSNR': psnr_scores[i],
+                            'SSIM': ssim_scores[i],
+                            'Sıkıştırma': ratio_scores[i],
+                            'Süre': time_scores[i]
+                        }
+                        individual_scores[codec]['Toplam'] = (psnr_scores[i] + ssim_scores[i] + ratio_scores[i] + time_scores[i]) / 4
+                        total_scores[codec] = individual_scores[codec]['Toplam']
+                    
+                    # Codec skorlarını sakla
+                    self.codec_scores = individual_scores
+                    
+                    # Skorları konsola yazdır
+                    print("\nCodec Performans Skorları (1.0 en iyi):")
+                    print("-" * 60)
+                    print(f"{'Codec':<12} {'PSNR':<10} {'SSIM':<10} {'Sıkıştırma':<12} {'Süre':<10} {'Toplam':<10}")
+                    print("-" * 60)
+                    for codec in codecs:
+                        scores = individual_scores[codec]
+                        print(f"{codec:<12} {scores['PSNR']:.4f}    {scores['SSIM']:.4f}    {scores['Sıkıştırma']:.4f}      {scores['Süre']:.4f}    {scores['Toplam']:.4f}")
+                    print("-" * 60)
                 
                 canvas.figure.tight_layout()
                 canvas.draw()
@@ -357,12 +386,13 @@ class PlotWindow(QMainWindow):
             # "image_compression" sekmesi
             ax1 = self.plot_canvases["image_compression"].figure.add_subplot(111)
             for method in results:
+                compression_ratios = [100 - ratio for ratio in results[method]["compression_ratios"]]  # Sıkıştırma oranını tersine çevir
                 ax1.plot(results[method]["qualities"], 
-                        results[method]["compression_ratios"], 
+                        compression_ratios, 
                         marker='.', label=method)
             ax1.set_xlabel("Kalite Faktörü")
-            ax1.set_ylabel("Sıkıştırma Oranı (%)")
-            ax1.set_title("Sıkıştırma Oranı vs Kalite")
+            ax1.set_ylabel("Sıkıştırılmış Boyut (%)")
+            ax1.set_title("Sıkıştırılmış Boyut vs Kalite")
             ax1.legend()
             ax1.grid(True)
             self.plot_canvases["image_compression"].figure.tight_layout()
@@ -511,7 +541,7 @@ class MultimediaBenchmark(QMainWindow):
         video_layout = QVBoxLayout(self.video_settings)
         video_layout.addWidget(QLabel("Video Codec:"))
         self.video_codec_combo = QComboBox()
-        self.video_codec_combo.addItems(["H.264", "H.265/HEVC", "VP9"])
+        self.video_codec_combo.addItems(["H.264", "H.265/HEVC", "MPEG-4", "MJPEG"])
         video_layout.addWidget(self.video_codec_combo)
         video_layout.addWidget(QLabel("CRF (Kalite):"))
         self.video_quality_spin = QSpinBox()
@@ -539,7 +569,9 @@ class MultimediaBenchmark(QMainWindow):
         original_layout.addWidget(QLabel("Orijinal Görüntü"))
         self.original_image_label = QLabel()
         self.original_image_label.setMinimumSize(400, 300)
+        self.original_image_label.setMaximumSize(400, 300)  # Maksimum boyutu sabitle
         self.original_image_label.setStyleSheet("border: 1px solid #666;")
+        self.original_image_label.setAlignment(Qt.AlignCenter)  # Merkeze hizala
         original_layout.addWidget(self.original_image_label)
         images_panel.addLayout(original_layout)
         
@@ -548,7 +580,9 @@ class MultimediaBenchmark(QMainWindow):
         compressed_layout.addWidget(QLabel("Sıkıştırılmış Görüntü"))
         self.compressed_image_label = QLabel()
         self.compressed_image_label.setMinimumSize(400, 300)
+        self.compressed_image_label.setMaximumSize(400, 300)  # Maksimum boyutu sabitle
         self.compressed_image_label.setStyleSheet("border: 1px solid #666;")
+        self.compressed_image_label.setAlignment(Qt.AlignCenter)  # Merkeze hizala
         compressed_layout.addWidget(self.compressed_image_label)
         images_panel.addLayout(compressed_layout)
         
@@ -675,13 +709,12 @@ class MultimediaBenchmark(QMainWindow):
             # Plot sekmelerini oluştur
             self.plot_window.setup_plot_tabs()
             
-            # Eğer görüntü modundaysa ve orijinal görüntü yüklenmişse grafikleri güncelle
+            # Eğer görüntü modundaysa ve sonuçlar mevcutsa grafikleri güncelle
             if (self.plot_window.mode == 'image' and 
-                hasattr(self, 'original_image') and 
-                self.original_image is not None):
+                hasattr(self.image_processor, 'last_results') and 
+                self.image_processor.last_results is not None):
                 try:
-                    results = self.image_processor.analyze_all_methods(self.original_image)
-                    self.plot_window.update_plots(results)
+                    self.plot_window.update_plots(self.image_processor.last_results)
                 except Exception as e:
                     print(f"Grafik güncelleme hatası: {str(e)}")
                     import traceback
@@ -698,7 +731,8 @@ class MultimediaBenchmark(QMainWindow):
         )
         if file_name:
             self.image_path_label.setText(file_name)
-            self.original_image = self.image_processor.load_image(file_name)
+            # Sadece görüntüyü yükle, analiz yapma
+            self.original_image = cv2.imread(file_name)
             self.display_image(self.original_image, self.original_image_label)
             # Görüntü ayarlarını göster, video ayarlarını gizle
             self.image_settings.show()
@@ -712,9 +746,6 @@ class MultimediaBenchmark(QMainWindow):
             # Eğer hali hazırda plot penceresi varsa modu 'image' olarak ayarla
             if self.plot_window is not None:
                 self.plot_window.set_mode('image')
-            
-            # Görsel grafikleri göster
-            self.show_image_plots()
     
     def select_video_file(self):
         """Video dosyası seçme işlemini gerçekleştirir."""
@@ -771,20 +802,93 @@ class MultimediaBenchmark(QMainWindow):
     
     def display_image(self, image: np.ndarray, label: QLabel):
         """Numpy dizisini QLabel'da görüntüler."""
-        if len(image.shape) == 3 and image.shape[2] == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        height, width = image.shape[:2]
-        bytes_per_line = 3 * width
-        q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-        pixmap = QPixmap.fromImage(q_image)
-        label.setPixmap(pixmap.scaled(label.size(), Qt.KeepAspectRatio))
+        try:
+            if image is None:
+                return
+                
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Label'ın sabit boyutlarını al
+            label_width = 400  # Sabit genişlik
+            label_height = 300  # Sabit yükseklik
+            
+            # Görüntünün orijinal boyutlarını al
+            height, width = image.shape[:2]
+            
+            # En-boy oranını koru
+            aspect_ratio = width / height
+            
+            # Label'ın en-boy oranı
+            label_aspect_ratio = label_width / label_height
+            
+            # Yeni boyutları hesapla
+            if aspect_ratio > label_aspect_ratio:
+                # Görüntü daha geniş, genişliğe göre ölçekle
+                new_width = label_width
+                new_height = int(new_width / aspect_ratio)
+                # Dikey boşlukları hesapla
+                y_offset = (label_height - new_height) // 2
+                x_offset = 0
+            else:
+                # Görüntü daha uzun, yüksekliğe göre ölçekle
+                new_height = label_height
+                new_width = int(new_height * aspect_ratio)
+                # Yatay boşlukları hesapla
+                x_offset = (label_width - new_width) // 2
+                y_offset = 0
+            
+            # Görüntüyü yeniden boyutlandır
+            scaled_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+            
+            # Siyah arka plan oluştur
+            background = np.zeros((label_height, label_width, 3), dtype=np.uint8)
+            
+            # Ölçeklendirilmiş görüntüyü arka plana yerleştir
+            y_start = y_offset
+            y_end = y_start + new_height
+            x_start = x_offset
+            x_end = x_start + new_width
+            background[y_start:y_end, x_start:x_end] = scaled_image
+            
+            # QImage oluştur
+            bytes_per_line = 3 * label_width
+            q_image = QImage(background.data, label_width, label_height, bytes_per_line, QImage.Format_RGB888)
+            
+            # QPixmap oluştur ve label'a ayarla
+            pixmap = QPixmap.fromImage(q_image)
+            label.setPixmap(pixmap)
+            
+        except Exception as e:
+            print(f"Görüntü gösterme hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
+    def format_size(self, size_in_bytes: int) -> str:
+        """Bayt cinsinden boyutu okunaklı formata dönüştürür."""
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size_in_bytes < 1024.0:
+                return f"{size_in_bytes:.2f} {unit}"
+            size_in_bytes /= 1024.0
+        return f"{size_in_bytes:.2f} TB"
+
     def compress_and_analyze(self):
         """Görüntüyü sıkıştırır ve analiz eder."""
         try:
+            # Butonu devre dışı bırak ve metnini güncelle
+            self.compress_btn.setEnabled(False)
+            self.compress_btn.setText("İşleniyor...")
+            self.compress_btn.repaint()  # Buton metnini hemen güncelle
+            QApplication.processEvents()  # UI'ı hemen güncelle
+            
             print("Sıkıştırma başlıyor...")
             method = self.image_compression_combo.currentText()
             quality = self.image_quality_spin.value()
+            
+            # Orijinal boyutu hesapla
+            _, original_buffer = cv2.imencode('.png', self.original_image)
+            original_size = len(original_buffer)
+            self.image_processor.original_size = original_size
             
             # Sıkıştırma ve analiz
             compressed, metrics = self.image_processor.compress_and_analyze(
@@ -792,8 +896,19 @@ class MultimediaBenchmark(QMainWindow):
             )
             
             print("Arayüz güncelleniyor...")
-            # Metrikleri göster
-            self.update_metrics_label(metrics)
+            # Anlık metrikleri göster
+            metrics_text = f"""
+            <table style='color: #ECF0F1;'>
+                <tr><td colspan='2'><b>Anlık Metrikler:</b></td></tr>
+                <tr><td>Sıkıştırma Oranı:</td><td>{metrics['compression_ratio']:.2f}%</td></tr>
+                <tr><td>Orijinal Boyut:</td><td>{self.format_size(original_size)}</td></tr>
+                <tr><td>Sıkıştırılmış Boyut:</td><td>{self.format_size(metrics['file_size'])}</td></tr>
+                <tr><td>PSNR:</td><td>{metrics['PSNR']:.2f} dB</td></tr>
+                <tr><td>SSIM:</td><td>{metrics['SSIM']:.4f}</td></tr>
+                <tr><td>LPIPS:</td><td>{metrics['LPIPS']:.4f}</td></tr>
+            </table>
+            """
+            self.metrics_label.setText(metrics_text)
             
             # Sıkıştırılmış görüntüyü göster
             self.display_image(compressed, self.compressed_image_label)
@@ -801,10 +916,12 @@ class MultimediaBenchmark(QMainWindow):
             print("Tüm yöntemler analiz ediliyor...")
             # Tüm yöntemleri analiz et
             results = self.image_processor.analyze_all_methods(self.original_image)
+            # Sonuçları sakla
+            self.image_processor.last_results = results
             
             print("En iyi yöntem belirleniyor...")
             # En iyi yöntemi bul
-            optimal = self.image_processor.find_optimal_method(results)
+            optimal = self.find_optimal_method(results)
             
             # Önerilen yöntemi güncelle
             self.update_recommendation_label(optimal)
@@ -820,25 +937,101 @@ class MultimediaBenchmark(QMainWindow):
             import traceback
             traceback.print_exc()
             self.metrics_label.setText(f"İşlem sırasında hata oluştu: {str(e)}")
+            
+        finally:
+            # İşlem bittiğinde butonu tekrar aktif et ve metnini güncelle
+            self.compress_btn.setEnabled(True)
+            self.compress_btn.setText("Sıkıştır ve Analiz Et")
+            self.compress_btn.repaint()  # Buton metnini hemen güncelle
+            QApplication.processEvents()  # UI'ı hemen güncelle
     
     def update_metrics_label(self, metrics: dict):
         """Metrik etiketini günceller."""
         text = f"""
         <table style='color: #ECF0F1;'>
-            <tr><td colspan='2' style='text-align:center;'><b>Sıkıştırma Bilgileri</b></td></tr>
-            <tr><td><b>Yöntem:</b></td><td>{metrics.get('method', 'N/A')}</td></tr>
-            <tr><td><b>Kalite:</b></td><td>{metrics.get('quality', 0)}</td></tr>
-            <tr><td colspan='2' style='text-align:center;'><b>Dosya Boyutları</b></td></tr>
-            <tr><td><b>Orijinal:</b></td><td>{metrics.get('original_size', 0)/1024:.2f} KB</td></tr>
-            <tr><td><b>Sıkıştırılmış:</b></td><td>{metrics.get('file_size', 0)/1024:.2f} KB</td></tr>
-            <tr><td><b>Sıkıştırma Oranı:</b></td><td>{metrics.get('compression_ratio', 0):.2f}%</td></tr>
-            <tr><td colspan='2' style='text-align:center;'><b>Kalite Metrikleri</b></td></tr>
-            <tr><td><b>PSNR:</b></td><td>{metrics.get('PSNR', 0):.2f} dB</td></tr>
-            <tr><td><b>SSIM:</b></td><td>{metrics.get('SSIM', 0):.4f}</td></tr>
-            <tr><td><b>LPIPS:</b></td><td>{metrics.get('LPIPS', 0):.4f}</td></tr>
+            <tr><td colspan='4' style='text-align:center; background-color: #2c3e50;'><b>Performans Skorları</b></td></tr>
+            <tr><td colspan='4' style='text-align:center;'><i>(100 en iyi)</i></td></tr>
+            <tr>
+                <td colspan='2' style='text-align:center; background-color: #34495e;'><b>Codec Performansı</b></td>
+                <td colspan='2' style='text-align:center; background-color: #34495e;'><b>Sıkıştırma Algoritmaları</b></td>
+            </tr>
+            <tr>
+                <td colspan='2'>
+                    <table style='width:100%; color: #FFFFFF;'>
+                        <tr style='background-color: #2c3e50;'>
+                            <td><b>Codec</b></td>
+                            <td><b>PSNR</b></td>
+                            <td><b>SSIM</b></td>
+                            <td><b>Sıkış.</b></td>
+                            <td><b>Süre</b></td>
+                            <td><b>Toplam</b></td>
+                        </tr>"""
+        
+        # Codec skorlarını ekle
+        if hasattr(self, 'codec_scores'):
+            for codec, scores in self.codec_scores.items():
+                # Skorları 100 üzerinden hesapla
+                psnr_100 = scores['PSNR'] * 100
+                ssim_100 = scores['SSIM'] * 100
+                comp_100 = scores['Sıkıştırma'] * 100
+                time_100 = scores['Süre'] * 100
+                total_100 = scores['Toplam'] * 100
+                
+                text += f"""
+                        <tr>
+                            <td>{codec}</td>
+                            <td>{psnr_100:.1f}</td>
+                            <td>{ssim_100:.1f}</td>
+                            <td>{comp_100:.1f}</td>
+                            <td>{time_100:.1f}</td>
+                            <td>{total_100:.1f}</td>
+                        </tr>"""
+        
+        text += """
+                    </table>
+                </td>
+                <td colspan='2'>
+                    <table style='width:100%; color: #FFFFFF;'>
+                        <tr style='background-color: #2c3e50;'>
+                            <td><b>Algoritma</b></td>
+                            <td><b>Sıkış.</b></td>
+                            <td><b>Süre</b></td>
+                            <td><b>Hız</b></td>
+                            <td><b>Toplam</b></td>
+                        </tr>"""
+        
+        # Sıkıştırma algoritması skorlarını ekle
+        if "Compression_Algorithms" in metrics:
+            compression_metrics = metrics["Compression_Algorithms"]
+            if compression_metrics and isinstance(compression_metrics, dict):
+                # Maksimum değerleri bul
+                max_ratio = max(m['ratio'] for m in compression_metrics.values())
+                min_time = min(m['time'] for m in compression_metrics.values())
+                max_speed = max(m['speed'] for m in compression_metrics.values())
+                
+                for algo, values in compression_metrics.items():
+                    # Skorları 100 üzerinden hesapla
+                    ratio_score = (values['ratio'] / max_ratio) * 100 if max_ratio > 0 else 0
+                    time_score = (min_time / values['time']) * 100 if values['time'] > 0 else 0
+                    speed_score = (values['speed'] / max_speed) * 100 if max_speed > 0 else 0
+                    total_score = (ratio_score + time_score + speed_score) / 3
+                    
+                    text += f"""
+                        <tr>
+                            <td>{algo}</td>
+                            <td>{ratio_score:.1f}</td>
+                            <td>{time_score:.1f}</td>
+                            <td>{speed_score:.1f}</td>
+                            <td>{total_score:.1f}</td>
+                        </tr>"""
+        
+        text += """
+                    </table>
+                </td>
+            </tr>
         </table>
         """
-        self.metrics_label.setText(text)
+        self.recommendation_label.setText(text)
     
     def update_recommendation_label(self, optimal: dict):
         """Öneri etiketini günceller."""
@@ -877,23 +1070,94 @@ class MultimediaBenchmark(QMainWindow):
     
     def update_time(self, remaining: float, elapsed: float):
         """Kalan ve geçen süreyi günceller."""
-        self.time_label.setText(
-            f"Kalan Süre: {remaining:.1f}s | "
-            f"Geçen Süre: {elapsed:.1f}s"
-        )
+        if hasattr(self.video_processor, 'total_frames'):
+            current_frame = self.video_processor.processed_frames
+            remaining_frames = self.video_processor.total_frames - current_frame
+            
+            # Son 10 frame'in ortalama işleme hızını hesapla
+            if hasattr(self.video_processor, 'frame_times'):
+                recent_times = self.video_processor.frame_times[-10:]  # Son 10 frame'in süreleri
+                if recent_times:
+                    avg_frame_time = sum(recent_times) / len(recent_times)
+                    remaining = remaining_frames * avg_frame_time
+            
+            # Süre formatlaması
+            def format_time(seconds):
+                if seconds < 60:
+                    return f"{seconds:.1f}s"
+                elif seconds < 3600:
+                    minutes = seconds // 60
+                    seconds = seconds % 60
+                    return f"{int(minutes)}dk {int(seconds)}s"
+                elif seconds < 86400:  # 24 saat
+                    hours = seconds // 3600
+                    minutes = (seconds % 3600) // 60
+                    return f"{int(hours)}sa {int(minutes)}dk"
+                else:
+                    days = seconds // 86400
+                    hours = (seconds % 86400) // 3600
+                    return f"{int(days)}gün {int(hours)}sa"
+            
+            remaining_str = format_time(remaining)
+            elapsed_str = format_time(elapsed)
+            
+            self.time_label.setText(
+                f"Kalan Süre: {remaining_str} | "
+                f"Geçen Süre: {elapsed_str}"
+            )
     
     def update_compression(self, ratio: float):
         """Sıkıştırma oranını günceller."""
-        text = f"""
-        <table style='color: #ECF0F1;'>
-            <tr><td><b>Anlık Sıkıştırma Oranı:</b></td><td>{ratio:.2f}%</td></tr>
-        </table>
-        """
-        self.metrics_label.setText(text)
+        try:
+            # Orijinal boyutu al
+            original_size = self.video_processor.original_size
+            
+            # Frame sayısını al
+            current_frame = self.video_processor.processed_frames
+            total_frames = self.video_processor.total_frames
+            
+            # Her frame için ortalama boyut hesapla
+            avg_frame_size = original_size / total_frames if total_frames > 0 else 0
+            
+            # Şu ana kadar işlenen frame'lerin toplam boyutu
+            processed_size = avg_frame_size * current_frame
+            
+            # Sıkıştırılmış boyutu hesapla
+            compressed_size = int(processed_size * (1 - ratio/100))
+            
+            # Yeni sıkıştırma oranı metni
+            compression_text = f"""
+            <table style='color: #ECF0F1;'>
+                <tr><td colspan='2'><b>Anlık Metrikler:</b></td></tr>
+                <tr><td>Sıkıştırma Oranı:</td><td>{ratio:.2f}%</td></tr>
+                <tr><td>Orijinal Boyut:</td><td>{self.format_size(original_size)}</td></tr>
+                <tr><td>İşlenen Boyut:</td><td>{self.format_size(processed_size)}</td></tr>
+                <tr><td>Sıkıştırılmış Boyut:</td><td>{self.format_size(compressed_size)}</td></tr>
+                <tr><td>LPIPS:</td><td>{self.video_processor.metrics_history["LPIPS"][-1] if self.video_processor.metrics_history["LPIPS"] else 0:.4f}</td></tr>
+            </table>
+            """
+            
+            # Metrik etiketini güncelle
+            self.metrics_label.setText(compression_text)
+            
+            # UI'ı hemen güncelle
+            QApplication.processEvents()
+            
+        except Exception as e:
+            print(f"Sıkıştırma oranı güncelleme hatası: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def update_progress(self, value: int):
         """İlerleme çubuğunu günceller."""
-        self.progress_bar.setValue(value)
+        if hasattr(self.video_processor, 'total_frames'):
+            # Progress bar'ı güncelle
+            self.progress_bar.setValue(value)
+            
+            # İşlem tamamlandıysa
+            if value >= self.video_processor.total_frames - 1:  # Son frame'e ulaşıldığında
+                self.video_processor.stop()
+                self.on_video_processing_finished()
     
     def update_frames(self, original: np.ndarray, compressed: np.ndarray):
         """Orijinal ve sıkıştırılmış kareleri günceller."""
@@ -951,7 +1215,7 @@ class MultimediaBenchmark(QMainWindow):
                     "frame_number": len(metrics["PSNR"]),
                     "PSNR": max(metrics["PSNR"]) if metrics["PSNR"] else 0,
                     "SSIM": max(metrics["SSIM"]) if metrics["SSIM"] else 0,
-                    "LPIPS": min(metrics["LPIPS"]) if metrics["LPIPS"] else 1,
+                    "LPIPS": min(metrics["LPIPS"]) if metrics["LPIPS"] else 0,
                     "Entropy": max(metrics["Entropy"]) if metrics["Entropy"] else 0
                 },
                 "best_compression": {
@@ -962,37 +1226,10 @@ class MultimediaBenchmark(QMainWindow):
                     "Entropy": metrics["Entropy"][metrics["Compression_Ratio"].index(max(metrics["Compression_Ratio"]))] if metrics["Compression_Ratio"] else 0
                 }
             }
-            
-            # Codec performansını hesapla
-            codec_metrics = metrics.get("Codec_Performance", {})
-            if codec_metrics and isinstance(codec_metrics, dict):
-                codec_scores = {}
-                for codec, values in codec_metrics.items():
-                    psnr_score = values["psnr"] / 50.0
-                    ssim_score = values["ssim"]
-                    # Use either compression_ratio or ratio, whichever is available
-                    compression_ratio = values.get("compression_ratio", values.get("ratio", 0))
-                    compression_score = compression_ratio / 100.0
-                    total_score = psnr_score * 0.3 + ssim_score * 0.4 + compression_score * 0.3
-                    codec_scores[codec] = {
-                        "total_score": total_score,
-                        "psnr_score": psnr_score,
-                        "ssim_score": ssim_score,
-                        "compression_score": compression_score
-                    }
-                best_codec, best_scores = max(codec_scores.items(), key=lambda x: x[1]["total_score"])
-                best_metrics["best_quality"]["codec"] = best_codec
-                best_metrics["best_quality"]["total_score"] = best_scores["total_score"]
-            
-            # Sıkıştırma algoritması performansını hesapla
-            compression_metrics = metrics.get("Compression_Algorithms", {})
-            if compression_metrics and isinstance(compression_metrics, dict):
-                algo_scores = {}
-                for algo, values in compression_metrics.items():
-                    algo_scores[algo] = values["ratio"]
-                best_algo = max(algo_scores.items(), key=lambda x: x[1])
-                best_metrics["best_compression"]["algorithm"] = best_algo[0]
-                best_metrics["best_compression"]["algorithm_score"] = best_algo[1]
+
+            # Sıkıştırma algoritması metriklerini ekle
+            if "Compression_Algorithms" in metrics:
+                best_metrics["Compression_Algorithms"] = metrics["Compression_Algorithms"]
             
             # Metrikleri güncelle
             text = f"""
@@ -1013,6 +1250,48 @@ class MultimediaBenchmark(QMainWindow):
             # En iyi değerleri güncelle
             self.update_current_best_label(best_metrics)
             
+            # Codec performansını hesapla ve önerilen yöntemi güncelle
+            codec_metrics = metrics.get("Codec_Performance", {})
+            if codec_metrics and isinstance(codec_metrics, dict):
+                codecs = list(codec_metrics.keys())
+                
+                # PSNR skorları
+                psnr_values = [codec_metrics[codec].get("psnr", 0) for codec in codecs]
+                max_psnr = max(psnr_values) if psnr_values else 1
+                psnr_scores = [v/max_psnr for v in psnr_values]
+                
+                # SSIM skorları
+                ssim_values = [codec_metrics[codec].get("ssim", 0) for codec in codecs]
+                max_ssim = max(ssim_values) if ssim_values else 1
+                ssim_scores = [v/max_ssim for v in ssim_values]
+                
+                # Sıkıştırma oranı skorları
+                ratios = [codec_metrics[codec].get("ratio", 0) for codec in codecs]
+                min_ratio = min(ratios) if ratios else 1
+                ratio_scores = [min_ratio/v if v != 0 else 0 for v in ratios]
+                
+                # İşlem süresi skorları
+                times = [codec_metrics[codec].get("time", 0) for codec in codecs]
+                min_time = min(times) if times else 1
+                time_scores = [min_time/v if v != 0 else 0 for v in times]
+                
+                # Her codec için toplam skoru hesapla
+                individual_scores = {}
+                for i, codec in enumerate(codecs):
+                    individual_scores[codec] = {
+                        'PSNR': psnr_scores[i],
+                        'SSIM': ssim_scores[i],
+                        'Sıkıştırma': ratio_scores[i],
+                        'Süre': time_scores[i],
+                        'Toplam': (psnr_scores[i]*1.2 + ssim_scores[i]*1.2 + ratio_scores[i]*1.2 + time_scores[i]*0.4) / 4
+                    }
+                
+                # Codec skorlarını sakla
+                self.codec_scores = individual_scores
+                
+                # Önerilen yöntem etiketini güncelle
+                self.update_metrics_label(metrics)
+            
             # Grafikleri güncelle
             if self.plot_window is not None and self.plot_window.isVisible():
                 self.plot_window.update_video_plots(metrics)
@@ -1029,9 +1308,24 @@ class MultimediaBenchmark(QMainWindow):
                 print("Hata: Video dosyası seçilmemiş!")
                 return
             
+            # Video'nun toplam frame sayısını al
+            cap = cv2.VideoCapture(self.video_path)
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = int(cap.get(cv2.CAP_PROP_FPS))
+            cap.release()
+            
             output_path = self.video_path.rsplit('.', 1)[0] + '_compressed.' + self.video_path.rsplit('.', 1)[1]
             codec = self.video_codec_combo.currentText()
             crf = self.video_quality_spin.value()
+            
+            # Progress bar'ı ayarla
+            self.progress_bar.setMinimum(0)
+            self.progress_bar.setMaximum(total_frames)
+            self.progress_bar.setValue(0)
+            
+            # Video processor parametrelerini ayarla
+            self.video_processor.total_frames = total_frames
+            self.video_processor.fps = fps
             self.video_processor.set_parameters(self.video_path, output_path, codec, crf)
             self.video_processor.start()
             
@@ -1057,6 +1351,15 @@ class MultimediaBenchmark(QMainWindow):
     
     def update_current_best_label(self, current_best: dict):
         """Anlık en iyi değerleri günceller."""
+        # En iyi codec'i bul
+        best_codec = None
+        best_codec_score = -1
+        if hasattr(self, 'codec_scores'):
+            for codec, scores in self.codec_scores.items():
+                if scores['Toplam'] > best_codec_score:
+                    best_codec_score = scores['Toplam']
+                    best_codec = codec
+
         text = f"""
         <table style='color: #FFFFFF;'>
             <tr><td colspan='2' style='text-align:center; background-color: #2c3e50;'><b>En İyi Kalite Değerleri</b></td></tr>
@@ -1065,19 +1368,46 @@ class MultimediaBenchmark(QMainWindow):
             <tr><td>SSIM:</td><td>{current_best['best_quality']['SSIM']:.4f}</td></tr>
             <tr><td>LPIPS:</td><td>{current_best['best_quality']['LPIPS']:.4f}</td></tr>
             <tr><td>Entropi:</td><td>{current_best['best_quality']['Entropy']:.4f}</td></tr>
-            <tr><td colspan='2'><b>Önerilen Yöntem:</b></td></tr>
-            <tr><td>Codec:</td><td>{current_best['best_quality'].get('codec', 'N/A')}</td></tr>
-            <tr><td>Toplam Skor:</td><td>{current_best['best_quality'].get('total_score', 0.0):.4f}</td></tr>
+            <tr><td colspan='2'><b>Önerilen Codec:</b></td></tr>"""
+
+        if best_codec and best_codec_score > 0:
+            text += f"""
+            <tr><td>Codec:</td><td>{best_codec}</td></tr>
+            <tr><td>Toplam Skor:</td><td>{best_codec_score*100:.4f}%</td></tr>"""
+        else:
+            text += """
+            <tr><td colspan='2'>Henüz yeterli veri yok</td></tr>"""
             
+        text += f"""
             <tr><td colspan='2' style='text-align:center; background-color: #2c3e50;'><b>En İyi Sıkıştırma Değerleri</b></td></tr>
             <tr><td colspan='2'><b>Kare {current_best['best_compression']['frame_number']}:</b></td></tr>
             <tr><td>Sıkıştırma Oranı:</td><td>{current_best['best_compression']['ratio']:.2f}%</td></tr>
             <tr><td>PSNR:</td><td>{current_best['best_compression']['PSNR']:.2f} dB</td></tr>
             <tr><td>SSIM:</td><td>{current_best['best_compression']['SSIM']:.4f}</td></tr>
-            <tr><td>Entropi:</td><td>{current_best['best_compression']['Entropy']:.4f}</td></tr>
-            <tr><td colspan='2'><b>Önerilen Yöntem:</b></td></tr>
-            <tr><td>Algoritma:</td><td>{current_best['best_compression'].get('algorithm', 'N/A')}</td></tr>
-            <tr><td>Sıkıştırma Skoru:</td><td>{current_best['best_compression'].get('algorithm_score', 0.0):.2f}</td></tr>
+            <tr><td>Entropi:</td><td>{current_best['best_compression']['Entropy']:.4f}</td></tr>"""
+
+        # En iyi sıkıştırma algoritmasını bul
+        if 'Compression_Algorithms' in current_best:
+            best_algo = None
+            best_total_score = -1
+            for algo, metrics in current_best['Compression_Algorithms'].items():
+                # Normalize edilmiş metrikler (0-1 aralığında)
+                ratio_score = metrics['ratio'] / max(m['ratio'] for m in current_best['Compression_Algorithms'].values()) * 100
+                time_score = min(m['time'] for m in current_best['Compression_Algorithms'].values()) / metrics['time'] * 100
+                speed_score = metrics['speed'] / max(m['speed'] for m in current_best['Compression_Algorithms'].values()) * 100
+                total_score = (ratio_score + time_score + speed_score) / 3
+                
+                if total_score > best_total_score:
+                    best_total_score = total_score
+                    best_algo = algo
+            
+            if best_algo:
+                text += f"""
+                <tr><td colspan='2'><b>Önerilen Sıkıştırma Algoritması:</b></td></tr>
+                <tr><td>Algoritma:</td><td>{best_algo}</td></tr>
+                <tr><td>Toplam Skor:</td><td>{best_total_score:.1f}%</td></tr>"""
+
+        text += """
         </table>
         """
         self.current_best_label.setText(text)
@@ -1216,48 +1546,90 @@ class MultimediaBenchmark(QMainWindow):
         """En iyi sıkıştırma yöntemini ve parametrelerini bulur."""
         best_overall = {'score': -float('inf')}
         best_compression = {'compression_ratio': -float('inf')}
-        best_quality = {'quality_score': -float('inf')}
+        best_quality = {'psnr': -float('inf')}  # PSNR'a göre en iyi kaliteyi bul
+
+        # Her yöntem için maksimum değerleri bul
+        max_psnr = max(max(data['psnr_values']) for data in results.values())
+        max_compression = max(max(data['compression_ratios']) for data in results.values())
+
+        # Tüm skorları saklamak için dictionary
+        all_scores = {}
+
+        print("\nTüm Yöntemlerin Skorları:")
+        print("-" * 100)
+        print(f"{'Yöntem':<10} {'Kalite':<8} {'PSNR':<10} {'SSIM':<10} {'LPIPS':<10} {'Sıkıştırma':<12} {'Genel Skor':<12}")
+        print("-" * 100)
 
         for method, data in results.items():
+            method_scores = []
             for i, quality in enumerate(data['qualities']):
+                # Metrik değerlerini al
                 psnr = data['psnr_values'][i]
                 ssim = data['ssim_values'][i]
                 lpips = data['lpips_values'][i]
-                compression_ratio = data['compression_ratios'][i]
+                compression_ratio = data['compression_ratios'][i]  # Direkt olarak kullan
                 
-                # Kalite skoru (PSNR, SSIM, LPIPS)
-                quality_score = (psnr / 50.0) * 0.3 + ssim * 0.4 + (1 - lpips) * 0.3
+                # Normalize edilmiş metrikler (0-1 aralığında)
+                psnr_norm = psnr / max_psnr if max_psnr > 0 else 0
+                compression_norm = compression_ratio / max_compression if max_compression > 0 else 0
                 
-                # Genel skor (kalite %70, sıkıştırma %30 gibi)
-                compression_score = compression_ratio / 100.0
-                overall_score = quality_score * 0.7 + compression_score * 0.3
+                # Genel skor (sıkıştırma %30, PSNR %70)
+                overall_score = (compression_norm * 0.3) + (psnr_norm * 0.7)
+                overall_score = overall_score * 100  # 100 üzerinden göster
+                
+                # Skorları yazdır
+                print(f"{method:<10} {quality:<8} {psnr:<10.2f} {ssim:<10.4f} {lpips:<10.4f} {compression_ratio:<12.2f} {overall_score:<12.2f}")
+                
+                # Skorları sakla
+                method_scores.append({
+                    'quality': quality,
+                    'psnr': psnr,
+                    'ssim': ssim,
+                    'lpips': lpips,
+                    'compression_ratio': compression_ratio,
+                    'overall_score': overall_score
+                })
 
+                # En iyi genel performans (en yüksek skora sahip olan)
                 if overall_score > best_overall['score']:
                     best_overall = {
                         'method': method,
                         'quality': quality,
-                        'score': overall_score,
+                        'score': overall_score,  # Skor zaten 100 üzerinden
                         'psnr': psnr,
                         'ssim': ssim,
                         'lpips': lpips,
                         'compression_ratio': compression_ratio
                     }
+                
+                # En iyi sıkıştırma (en yüksek sıkıştırma oranına sahip olan)
                 if compression_ratio > best_compression['compression_ratio']:
                     best_compression = {
                         'method': method,
                         'quality': quality,
-                        'compression_ratio': compression_ratio,
-                        'score': overall_score
+                        'compression_ratio': compression_ratio
                     }
-                if quality_score > best_quality['quality_score']:
+                
+                # En iyi kalite (en yüksek PSNR değerine sahip olan)
+                if psnr > best_quality['psnr']:
                     best_quality = {
                         'method': method,
                         'quality': quality,
-                        'quality_score': quality_score,
+                        'quality_score': psnr_norm * 100,  # PSNR'ı 100 üzerinden göster
                         'psnr': psnr,
                         'ssim': ssim,
                         'lpips': lpips
                     }
+            
+            all_scores[method] = method_scores
+
+        print("-" * 100)
+        print("\nEn İyi Sonuçlar:")
+        print("-" * 100)
+        print(f"En İyi Genel Performans: {best_overall['method']} (Kalite: {best_overall['quality']}, Skor: {best_overall['score']:.2f})")
+        print(f"En İyi Sıkıştırma: {best_compression['method']} (Kalite: {best_compression['quality']}, Oran: {best_compression['compression_ratio']:.2f}%)")
+        print(f"En İyi Kalite: {best_quality['method']} (Kalite: {best_quality['quality']}, PSNR: {best_quality['psnr']:.2f}dB)")
+        print("-" * 100)
 
         return {
             'best_overall': best_overall,

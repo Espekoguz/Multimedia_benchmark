@@ -1,222 +1,188 @@
-import cv2
 import numpy as np
-from typing import Dict, Any, Tuple
+import cv2
+from typing import Dict, Any, Tuple, List
 from .base_processor import BaseImageProcessor
 
 class ColorProcessor(BaseImageProcessor):
-    """Renk uzayı dönüşümleri ve renk analizi işlemcisi."""
+    """Processor for color-related operations and analysis."""
     
     COLOR_SPACES = {
-        "RGB": {
-            "code": None,
-            "channels": ["R", "G", "B"]
-        },
-        "BGR": {
-            "code": None,
-            "channels": ["B", "G", "R"]
-        },
-        "HSV": {
-            "code": cv2.COLOR_BGR2HSV,
-            "channels": ["H", "S", "V"]
-        },
-        "LAB": {
-            "code": cv2.COLOR_BGR2LAB,
-            "channels": ["L", "A", "B"]
-        },
-        "YUV": {
-            "code": cv2.COLOR_BGR2YUV,
-            "channels": ["Y", "U", "V"]
-        },
-        "YCrCb": {
-            "code": cv2.COLOR_BGR2YCrCb,
-            "channels": ["Y", "Cr", "Cb"]
-        }
+        "BGR": cv2.COLOR_BGR2BGR,  # No conversion
+        "RGB": cv2.COLOR_BGR2RGB,
+        "HSV": cv2.COLOR_BGR2HSV,
+        "LAB": cv2.COLOR_BGR2LAB,
+        "YUV": cv2.COLOR_BGR2YUV,
+        "YCrCb": cv2.COLOR_BGR2YCrCb,
+        "GRAY": cv2.COLOR_BGR2GRAY
     }
     
-    def process(self, image: np.ndarray, target_space: str = "RGB", 
-               analyze: bool = True) -> Dict[str, Any]:
-        """Renk uzayı dönüşümü yapar ve renk analizini gerçekleştirir.
-        
-        Args:
-            image: İşlenecek görüntü
-            target_space: Hedef renk uzayı
-            analyze: Renk analizi yapılsın mı
-            
-        Returns:
-            Dict[str, Any]: İşlem sonuçları
-        """
-        if not self.validate_image(image):
-            raise ValueError("Geçersiz görüntü formatı")
-        
-        if target_space not in self.COLOR_SPACES:
-            raise ValueError(f"Desteklenmeyen renk uzayı: {target_space}")
-        
-        # Renk uzayı dönüşümü
-        converted = self.convert_color_space(image, target_space)
-        
-        results = {
-            "converted_image": converted,
-            "color_space": target_space,
-            "channels": self.COLOR_SPACES[target_space]["channels"]
-        }
-        
-        # Renk analizi
-        if analyze:
-            # Analiz için orijinal görüntüyü kullan (BGR formatında)
-            results.update(self.analyze_colors(image, "BGR"))
-        
-        return results
+    def __init__(self):
+        super().__init__()
+        self._current_color_space = "BGR"
     
-    def convert_color_space(self, image: np.ndarray, target_space: str) -> np.ndarray:
-        """Görüntüyü hedef renk uzayına dönüştürür.
-        
-        Args:
-            image: Dönüştürülecek görüntü
-            target_space: Hedef renk uzayı
-            
-        Returns:
-            np.ndarray: Dönüştürülmüş görüntü
-        """
-        # BGR'den hedef uzaya dönüşüm
-        if target_space == "BGR":
-            return image
-        elif target_space == "RGB":
-            return cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        else:
-            return cv2.cvtColor(image, self.COLOR_SPACES[target_space]["code"])
+    def initialize(self) -> None:
+        """Initialize color processor."""
+        pass  # No initialization needed
     
-    def analyze_colors(self, image: np.ndarray, color_space: str) -> Dict[str, Any]:
-        """Renk analizi yapar.
-        
-        Args:
-            image: Analiz edilecek görüntü
-            color_space: Görüntünün renk uzayı
-            
-        Returns:
-            Dict[str, Any]: Analiz sonuçları
-        """
-        results = {}
-        
-        # Kanal histogramları
-        histograms = self.calculate_channel_histograms(image)
-        results["histograms"] = histograms
-        
-        # Kanal istatistikleri
-        stats = self.calculate_channel_statistics(image)
-        results["statistics"] = stats
-        
-        # Renk korelasyonu
-        if color_space in ["RGB", "BGR"]:
-            correlation = self.calculate_color_correlation(image)
-            results["correlation"] = correlation
-        
-        return results
+    def get_supported_color_spaces(self) -> Dict[str, int]:
+        """Return supported color spaces."""
+        return self.COLOR_SPACES.copy()
     
-    def calculate_channel_histograms(self, image: np.ndarray) -> Dict[str, np.ndarray]:
-        """Her kanal için histogram hesaplar.
+    def process(self, image: np.ndarray, target_space: str = "BGR", 
+                analyze: bool = False) -> Dict[str, Any]:
+        """Process image color space and analyze color properties.
         
         Args:
-            image: Görüntü
+            image: Input image in BGR format
+            target_space: Target color space
+            analyze: Whether to perform color analysis
             
         Returns:
-            Dict[str, np.ndarray]: Kanal histogramları
+            Dictionary containing processed image and metrics
         """
-        histograms = {}
-        for i, channel in enumerate(self.COLOR_SPACES[self.get_color_space(image)]["channels"]):
-            hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-            histograms[channel] = hist.flatten()
-        return histograms
+        try:
+            self.validate_input(image)
+            result = {}
+            
+            # Convert color space if needed
+            if target_space != self._current_color_space:
+                if target_space not in self.COLOR_SPACES:
+                    raise ValueError(f"Unsupported color space: {target_space}")
+                
+                # Convert to target space
+                if target_space == "BGR":
+                    # Convert back to BGR from current space
+                    inverse_conversion = getattr(cv2, f"COLOR_{self._current_color_space}2BGR")
+                    processed = cv2.cvtColor(image, inverse_conversion)
+                else:
+                    conversion_code = self.COLOR_SPACES[target_space]
+                    processed = cv2.cvtColor(image, conversion_code)
+                
+                self._current_color_space = target_space
+            else:
+                processed = image.copy()
+            
+            result["converted_image"] = processed
+            
+            # Perform color analysis if requested
+            if analyze:
+                result.update(self._analyze_colors(processed, target_space))
+            
+            return result
+            
+        except Exception as e:
+            self.log_error(e, "color processing")
+            return {"converted_image": image.copy()}
     
-    def calculate_channel_statistics(self, image: np.ndarray) -> Dict[str, Dict[str, float]]:
-        """Her kanal için istatistiksel değerleri hesaplar.
-        
-        Args:
-            image: Görüntü
+    def _analyze_colors(self, image: np.ndarray, color_space: str) -> Dict[str, Any]:
+        """Analyze color properties of the image."""
+        try:
+            metrics = {}
             
-        Returns:
-            Dict[str, Dict[str, float]]: Kanal istatistikleri
-        """
-        stats = {}
-        color_space = self.get_color_space(image)
-        channels = cv2.split(image)
-        channel_names = self.COLOR_SPACES[color_space]["channels"]
-        
-        # BGR formatından diğer formatlara dönüşüm için kanal sıralamasını ayarla
-        if color_space == "BGR":
-            # OpenCV BGR formatında: channels[0] = B, channels[1] = G, channels[2] = R
-            channel_mapping = {
-                "B": channels[0],
-                "G": channels[1],
-                "R": channels[2]
+            # Calculate color distribution
+            if color_space in ["BGR", "RGB"]:
+                channels = ["Blue", "Green", "Red"] if color_space == "BGR" else ["Red", "Green", "Blue"]
+                for i, channel in enumerate(channels):
+                    hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+                    metrics[f"{channel}_Mean"] = float(np.mean(image[:, :, i]))
+                    metrics[f"{channel}_Std"] = float(np.std(image[:, :, i]))
+                    metrics[f"{channel}_Distribution"] = hist.flatten().tolist()
+            
+            # Calculate color correlation
+            if color_space in ["BGR", "RGB"]:
+                correlations = self._calculate_color_correlation(image)
+                metrics["Color_Correlations"] = correlations
+            
+            # Calculate color moments
+            moments = self._calculate_color_moments(image)
+            metrics["Color_Moments"] = moments
+            
+            # Calculate dominant colors
+            dominant_colors = self._find_dominant_colors(image, n_colors=5)
+            metrics["Dominant_Colors"] = dominant_colors
+            
+            return metrics
+            
+        except Exception as e:
+            self.log_error(e, "color analysis")
+            return {}
+    
+    def _calculate_color_correlation(self, image: np.ndarray) -> Dict[str, float]:
+        """Calculate correlation between color channels."""
+        try:
+            b, g, r = cv2.split(image)
+            
+            corr_rg = float(np.corrcoef(r.flatten(), g.flatten())[0, 1])
+            corr_rb = float(np.corrcoef(r.flatten(), b.flatten())[0, 1])
+            corr_gb = float(np.corrcoef(g.flatten(), b.flatten())[0, 1])
+            
+            return {
+                "R-G": corr_rg,
+                "R-B": corr_rb,
+                "G-B": corr_gb
             }
-        elif color_space == "RGB":
-            # RGB formatında: channels[0] = B, channels[1] = G, channels[2] = R -> R, G, B olarak değiştir
-            channel_mapping = {
-                "R": channels[2],
-                "G": channels[1],
-                "B": channels[0]
-            }
-        else:
-            # Diğer renk uzayları için sıralı eşleştirme
-            channel_mapping = dict(zip(channel_names, channels))
-        
-        # Her kanal için istatistikleri hesapla
-        for name in channel_names:
-            channel = channel_mapping[name]
-            stats[name] = {
-                "mean": float(np.mean(channel)),
-                "std": float(np.std(channel)),
-                "min": float(np.min(channel)),
-                "max": float(np.max(channel)),
-                "median": float(np.median(channel))
-            }
-        
-        return stats
-    
-    def calculate_color_correlation(self, image: np.ndarray) -> Dict[str, float]:
-        """Renk kanalları arasındaki korelasyonu hesaplar.
-        
-        Args:
-            image: RGB/BGR görüntü
             
-        Returns:
-            Dict[str, float]: Kanal korelasyonları
-        """
-        channels = cv2.split(image)
-        channel_names = self.COLOR_SPACES[self.get_color_space(image)]["channels"]
-        
-        correlations = {}
-        for i in range(3):
-            for j in range(i + 1, 3):
-                key = f"{channel_names[i]}-{channel_names[j]}"
-                corr = np.corrcoef(channels[i].flatten(), channels[j].flatten())[0, 1]
-                correlations[key] = float(corr)
-        
-        return correlations
+        except Exception as e:
+            self.log_error(e, "color correlation")
+            return {"R-G": 0.0, "R-B": 0.0, "G-B": 0.0}
     
-    def get_color_space(self, image: np.ndarray) -> str:
-        """Görüntünün renk uzayını tahmin eder.
-        
-        Args:
-            image: Görüntü
+    def _calculate_color_moments(self, image: np.ndarray) -> Dict[str, List[float]]:
+        """Calculate color moments (mean, std, skewness, kurtosis)."""
+        try:
+            moments = {}
             
-        Returns:
-            str: Renk uzayı
-        """
-        # Bu basit bir tahmin, gerçek uygulamada daha karmaşık olabilir
-        if len(image.shape) != 3:
-            raise ValueError("Geçersiz görüntü formatı")
-        
-        if image.shape[2] != 3:
-            raise ValueError("3 kanallı görüntü değil")
-        
-        return "BGR"  # OpenCV varsayılan olarak BGR kullanır
+            for i, channel in enumerate(["First", "Second", "Third"]):
+                pixels = image[:, :, i].flatten()
+                
+                mean = float(np.mean(pixels))
+                std = float(np.std(pixels))
+                skewness = float(np.mean(((pixels - mean) / std) ** 3)) if std != 0 else 0
+                kurtosis = float(np.mean(((pixels - mean) / std) ** 4)) if std != 0 else 0
+                
+                moments[channel] = [mean, std, skewness, kurtosis]
+            
+            return moments
+            
+        except Exception as e:
+            self.log_error(e, "color moments")
+            return {
+                "First": [0.0, 0.0, 0.0, 0.0],
+                "Second": [0.0, 0.0, 0.0, 0.0],
+                "Third": [0.0, 0.0, 0.0, 0.0]
+            }
     
-    @classmethod
-    def get_supported_color_spaces(cls) -> Dict[str, Dict[str, Any]]:
-        """Desteklenen renk uzaylarını döndürür.
-        
-        Returns:
-            Dict[str, Dict[str, Any]]: Renk uzayı bilgileri
-        """
-        return cls.COLOR_SPACES 
+    def _find_dominant_colors(self, image: np.ndarray, n_colors: int = 5) -> List[List[int]]:
+        """Find dominant colors using k-means clustering."""
+        try:
+            # Reshape image
+            pixels = image.reshape(-1, 3)
+            
+            # Convert to float32
+            pixels = np.float32(pixels)
+            
+            # Define criteria
+            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
+            
+            # Apply k-means
+            _, labels, centers = cv2.kmeans(pixels, n_colors, None, criteria, 10, 
+                                          cv2.KMEANS_RANDOM_CENTERS)
+            
+            # Convert centers to integers
+            centers = np.uint8(centers)
+            
+            # Count occurrences of each label
+            unique_labels, counts = np.unique(labels, return_counts=True)
+            
+            # Sort colors by frequency
+            sorted_indices = np.argsort(-counts)
+            sorted_colors = centers[sorted_indices].tolist()
+            
+            return sorted_colors
+            
+        except Exception as e:
+            self.log_error(e, "dominant colors")
+            return [[0, 0, 0]] * n_colors
+    
+    def cleanup(self) -> None:
+        """Clean up resources."""
+        pass  # No cleanup needed 

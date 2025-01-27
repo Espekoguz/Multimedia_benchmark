@@ -39,6 +39,7 @@ class VideoProcessor(QThread):
         self.original_size = 0
         self.processed_frames = 0
         self.total_frames = 0
+        self.frame_times = []  # Her frame'in işlenme süresini sakla
         
         # Video yakalama ve yazma nesneleri
         self.cap = None
@@ -186,8 +187,10 @@ class VideoProcessor(QThread):
     def process_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, Dict[str, float]]:
         """Tek bir kareyi işler ve sıkıştırır."""
         try:
+            frame_start_time = time.time()
+            
             # Kareyi sıkıştır
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100 - self.crf * 2]  # CRF'yi JPEG kalitesine dönüştür
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 100 - self.crf * 2]
             _, encoded = cv2.imencode('.jpg', frame, encode_param)
             compressed = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
             
@@ -283,40 +286,12 @@ class VideoProcessor(QThread):
             
             metrics["Codec_Performance"] = codec_metrics
             
-            # En iyi codec'i belirle
-            if codec_metrics:
-                best_codec = max(codec_metrics.items(),
-                               key=lambda x: (x[1]["ratio"] * 0.4 +
-                                            x[1]["psnr"] * 0.3 +
-                                            x[1]["ssim"] * 0.3))
-                metrics["Best_Codec"] = {
-                    "name": best_codec[0],
-                    "score": best_codec[1]["ratio"] * 0.4 +
-                             best_codec[1]["psnr"] * 0.3 +
-                             best_codec[1]["ssim"] * 0.3
-                }
-            else:
-                metrics["Best_Codec"] = {"name": "N/A", "score": 0}
-            
-            # En iyi sıkıştırma algoritmasını belirle
-            if compression_metrics:
-                best_algo = max(compression_metrics.items(),
-                              key=lambda x: x[1]["ratio"])
-                metrics["Best_Algorithm"] = {
-                    "name": best_algo[0],
-                    "compression_ratio": best_algo[1]["ratio"],
-                    "processing_time": best_algo[1]["time"],
-                    "memory_usage": best_algo[1]["memory"],
-                    "speed": best_algo[1]["speed"]
-                }
-            else:
-                metrics["Best_Algorithm"] = {
-                    "name": "N/A",
-                    "compression_ratio": 0,
-                    "processing_time": 0,
-                    "memory_usage": 0,
-                    "speed": 0
-                }
+            # Frame işleme süresini kaydet
+            frame_time = time.time() - frame_start_time
+            self.frame_times.append(frame_time)
+            # Sadece son 100 frame'in süresini tut
+            if len(self.frame_times) > 100:
+                self.frame_times.pop(0)
             
             return compressed, metrics
             
@@ -379,6 +354,7 @@ class VideoProcessor(QThread):
             self._stop = False
             self._pause = False
             self.start_time = time.time()
+            self.processed_frames = 0
             
             # Metrik geçmişini sıfırla
             self.metrics_history = {
@@ -429,7 +405,7 @@ class VideoProcessor(QThread):
                 self.processed_frames += 1
                 progress = int((self.processed_frames / self.total_frames) * 100)
                 
-                self.progress_update.emit(progress)
+                self.progress_update.emit(self.processed_frames)
                 self.frame_update.emit(frame, compressed)
                 self.metrics_update.emit(self.metrics_history)
                 
@@ -762,7 +738,7 @@ class VideoProcessor(QThread):
         return remaining_frames / frames_per_second
     
     def calculate_compression_ratio(self, current_size: int) -> float:
-        """Anlık sıkıştırma oranını hesaplar."""
+        """Sıkıştırma oranını hesaplar."""
         if self.original_size == 0:
             return 0
-        return 100 - ((current_size / self.original_size) * 100) 
+        return (1 - (current_size / self.original_size)) * 100  # Sıkıştırma oranı: (1 - sıkıştırılmış/orijinal) * 100 

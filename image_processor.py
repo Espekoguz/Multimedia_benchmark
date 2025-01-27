@@ -341,8 +341,7 @@ class ImageProcessor:
         """Sıkıştırma oranını hesaplar."""
         if original_size == 0:
             return 0
-        # Sıkıştırma oranını doğrudan hesapla
-        return ((compressed_size / original_size) * 100)
+        return (1 - (compressed_size / original_size)) * 100  # Sıkıştırma oranı: (1 - sıkıştırılmış/orijinal) * 100
     
     def analyze_all_methods(self, image: np.ndarray) -> Dict[str, Dict[str, List[float]]]:
         """Tüm sıkıştırma yöntemlerini analiz eder."""

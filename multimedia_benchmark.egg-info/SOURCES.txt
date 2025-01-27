@@ -12,6 +12,10 @@ multimedia_benchmark.egg-info/dependency_links.txt
 multimedia_benchmark.egg-info/requires.txt
 multimedia_benchmark.egg-info/top_level.txt
 tests/__init__.py
+tests/test_color_processor.py
+tests/test_main.py
+tests/test_metric_processor.py
+tests/test_video_processor.py
 tests/image/__init__.py
 tests/image/test_color.py
 tests/image/test_compression.py

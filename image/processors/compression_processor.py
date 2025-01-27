@@ -29,6 +29,21 @@ class CompressionProcessor(BaseImageProcessor):
     def __init__(self):
         super().__init__()
         self.original_size = 0
+        self._temp_files = []
+    
+    def initialize(self) -> None:
+        """Initialize compression processor."""
+        pass  # No initialization needed
+    
+    def cleanup(self) -> None:
+        """Clean up temporary files."""
+        for temp_file in self._temp_files:
+            if os.path.exists(temp_file):
+                try:
+                    os.remove(temp_file)
+                except Exception as e:
+                    self.log_error(e, "cleanup")
+        self._temp_files.clear()
     
     def process(self, image: np.ndarray, method: str = "JPEG", quality: int = 75, 
                save_path: str = None) -> Dict[str, Any]:
@@ -43,8 +58,10 @@ class CompressionProcessor(BaseImageProcessor):
         Returns:
             Dict[str, Any]: Sıkıştırma sonuçları
         """
-        if not self.validate_image(image):
-            raise ValueError("Geçersiz görüntü formatı")
+        # Validate input image
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Input must be a numpy array")
+        self.validate_input(image)
         
         if method not in self.SUPPORTED_METHODS:
             raise ValueError(f"Desteklenmeyen sıkıştırma yöntemi: {method}")
@@ -63,10 +80,6 @@ class CompressionProcessor(BaseImageProcessor):
         # İsteğe bağlı olarak kaydet
         if save_path:
             cv2.imwrite(save_path, compressed_image)
-        
-        # Geçici dosyayı sil
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
         
         # Sonuçları hazırla
         results = {
@@ -108,6 +121,7 @@ class CompressionProcessor(BaseImageProcessor):
         
         # Görüntüyü sıkıştır ve kaydet
         cv2.imwrite(temp_path, image, params)
+        self._temp_files.append(temp_path)  # Geçici dosyayı izle
         
         # Sıkıştırılmış görüntüyü oku ve boyutunu al
         compressed = cv2.imread(temp_path)
