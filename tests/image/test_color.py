@@ -97,7 +97,7 @@ class TestColorProcessor(unittest.TestCase):
         test_image[:, :, 1] = 150  # G kanalı
         test_image[:, :, 2] = 200  # R kanalı
         
-        results = self.processor.process(test_image)
+        results = self.processor.process(test_image, analyze=True)
         stats = results["statistics"]
         
         # B kanalı
@@ -125,7 +125,7 @@ class TestColorProcessor(unittest.TestCase):
         for i in range(10):
             test_image[i, :, :] = i * 25
         
-        results = self.processor.process(test_image)
+        results = self.processor.process(test_image, analyze=True)
         correlation = results["correlation"]
         
         # Tüm kanallar arasında tam korelasyon olmalı

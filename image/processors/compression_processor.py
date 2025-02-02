@@ -61,6 +61,10 @@ class CompressionProcessor(BaseImageProcessor):
         # Validate input image
         if not isinstance(image, np.ndarray):
             raise ValueError("Input must be a numpy array")
+        if len(image.shape) != 3 or image.shape[2] != 3:
+            raise ValueError("Input must be a 3-channel color image")
+        if image.dtype != np.uint8:
+            raise ValueError("Input must be an 8-bit image")
         self.validate_input(image)
         
         if method not in self.SUPPORTED_METHODS:

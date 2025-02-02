@@ -22,9 +22,13 @@ class MetricProcessor(BaseImageProcessor):
         self._initialized = False
     
     @property
-    def available_metrics(self) -> Dict[str, List[str]]:
-        """Return available metrics."""
-        return self.AVAILABLE_METRICS.copy()
+    def available_metrics(self) -> List[str]:
+        """Return available metrics as a flat list."""
+        metrics = []
+        metrics.extend(self.AVAILABLE_METRICS["basic"])
+        metrics.extend(self.AVAILABLE_METRICS["advanced"])
+        metrics.append("Entropy")
+        return metrics
     
     def initialize(self) -> None:
         """Initialize LPIPS model and other resources."""
@@ -52,61 +56,71 @@ class MetricProcessor(BaseImageProcessor):
         Returns:
             Dictionary containing calculated metrics
         """
-        try:
-            self.validate_input(compressed)
-            if reference is not None:
-                self.validate_input(reference)
-                
-                # Ensure same size
-                if reference.shape != compressed.shape:
-                    compressed = cv2.resize(compressed, (reference.shape[1], reference.shape[0]))
+        # Validate compressed image
+        if not isinstance(compressed, np.ndarray):
+            raise ValueError("Compressed image must be a numpy array")
+        if len(compressed.shape) != 3 or compressed.shape[2] != 3:
+            raise ValueError("Compressed image must be a 3-channel color image")
+        if compressed.dtype != np.uint8:
+            raise ValueError("Compressed image must be an 8-bit image")
+        self.validate_input(compressed)
+        
+        # Validate reference image if provided
+        if reference is not None:
+            if not isinstance(reference, np.ndarray):
+                raise ValueError("Reference image must be a numpy array")
+            if len(reference.shape) != 3 or reference.shape[2] != 3:
+                raise ValueError("Reference image must be a 3-channel color image")
+            if reference.dtype != np.uint8:
+                raise ValueError("Reference image must be an 8-bit image")
+            self.validate_input(reference)
             
-            result = {}
+            # Ensure same size
+            if reference.shape != compressed.shape:
+                compressed = cv2.resize(compressed, (reference.shape[1], reference.shape[0]))
+        
+        result = {}
+        
+        # Determine which metrics to calculate
+        if metrics is None:
+            metrics = self.available_metrics
+        
+        # Calculate reference-free metrics first
+        if "Entropy" in metrics:
+            result["Entropy"] = self.calculate_entropy(compressed)
+        
+        # Calculate reference-based metrics if reference is provided
+        if reference is not None:
+            if "MSE" in metrics:
+                mse = np.mean((reference.astype(float) - compressed.astype(float)) ** 2)
+                result["MSE"] = float(mse)
             
-            # Determine which metrics to calculate
-            if metrics is None:
-                metrics = self.AVAILABLE_METRICS["basic"]
-            
-            # Calculate basic metrics if reference is available
-            if reference is not None:
-                if "MSE" in metrics:
+            if "PSNR" in metrics:
+                if "MSE" in result:
+                    mse = result["MSE"]
+                else:
                     mse = np.mean((reference.astype(float) - compressed.astype(float)) ** 2)
-                    result["MSE"] = float(mse)
-                
-                if "PSNR" in metrics:
-                    if "MSE" in result:
-                        mse = result["MSE"]
-                    else:
-                        mse = np.mean((reference.astype(float) - compressed.astype(float)) ** 2)
-                    result["PSNR"] = float('inf') if mse == 0 else float(20 * np.log10(255.0 / np.sqrt(mse)))
-                
-                if "SSIM" in metrics:
-                    result["SSIM"] = float(ssim(reference, compressed, channel_axis=2, data_range=255))
-                
-                if "LPIPS" in metrics:
-                    if self._initialized and self._lpips_model is not None:
+                result["PSNR"] = float('inf') if mse == 0 else float(20 * np.log10(255.0 / np.sqrt(mse)))
+            
+            if "SSIM" in metrics:
+                result["SSIM"] = float(ssim(reference, compressed, channel_axis=2, data_range=255))
+            
+            if "LPIPS" in metrics:
+                if self._initialized and self._lpips_model is not None:
+                    result["LPIPS"] = self._calculate_lpips(reference, compressed)
+                else:
+                    self.initialize()
+                    if self._initialized:
                         result["LPIPS"] = self._calculate_lpips(reference, compressed)
                     else:
-                        self.initialize()
-                        if self._initialized:
-                            result["LPIPS"] = self._calculate_lpips(reference, compressed)
-                        else:
-                            result["LPIPS"] = 1.0
+                        result["LPIPS"] = 1.0
             
-            # Calculate advanced metrics if requested and reference is available
+            # Calculate advanced metrics if requested
             advanced_metrics = set(metrics) & set(self.AVAILABLE_METRICS["advanced"])
-            if advanced_metrics and reference is not None:
+            if advanced_metrics:
                 result.update(self._calculate_advanced_metrics(reference, compressed))
-            
-            # Calculate reference-free metrics
-            if "Entropy" in metrics:
-                result["Entropy"] = self.calculate_entropy(compressed)
-            
-            return result
-            
-        except Exception as e:
-            self.log_error(e, "metric calculation")
-            return {}
+        
+        return result
     
     def _calculate_lpips(self, original: np.ndarray, compressed: np.ndarray) -> float:
         """Calculate LPIPS perceptual similarity."""
@@ -188,15 +202,20 @@ class MetricProcessor(BaseImageProcessor):
     def calculate_entropy(self, image: np.ndarray) -> float:
         """Calculate image entropy."""
         try:
-            entropy = 0
-            for i in range(3):  # For each color channel
-                channel = image[:, :, i]
-                histogram = cv2.calcHist([channel], [0], None, [256], [0, 256])
-                histogram = histogram.flatten() / np.sum(histogram)
-                non_zero_hist = histogram[histogram > 0]
-                entropy += -np.sum(non_zero_hist * np.log2(non_zero_hist))
+            # Convert to grayscale if color image
+            if len(image.shape) == 3:
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            else:
+                gray = image
             
-            return float(entropy / 3)  # Average entropy
+            # Calculate histogram
+            hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+            hist = hist.flatten() / hist.sum()
+            
+            # Calculate entropy
+            entropy = -np.sum(hist * np.log2(hist + np.finfo(float).eps))
+            
+            return float(entropy)
             
         except Exception as e:
             self.log_error(e, "entropy calculation")

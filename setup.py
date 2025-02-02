@@ -8,14 +8,16 @@ setup(
         "numpy>=1.21.0",
         "opencv-python>=4.5.0",
         "PyQt5>=5.15.0",
-        "matplotlib>=3.4.0",
+        "matplotlib>=3.5.0",
         "torch>=1.9.0",
         "torchvision>=0.10.0",
         "lpips>=0.1.4",
         "scikit-image>=0.18.0",
         "av>=9.0.0",
         "psutil>=5.8.0",
-        "pillow>=8.3.0"
+        "pillow>=8.3.0",
+        "seaborn>=0.11.0",
+        "pandas>=1.3.0"
     ],
     extras_require={
         "dev": [
@@ -41,5 +43,7 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Topic :: Multimedia :: Graphics",
         "Topic :: Multimedia :: Video",
+        "Topic :: Scientific/Engineering :: Visualization",
+        "Topic :: Scientific/Engineering :: Image Processing",
     ],
 ) 

@@ -2,18 +2,37 @@ import numpy as np
 import cv2
 from typing import Dict, Any, Tuple, List
 from .base_processor import BaseImageProcessor
+from sklearn.cluster import KMeans
+from scipy.stats import skew, kurtosis
 
 class ColorProcessor(BaseImageProcessor):
     """Processor for color-related operations and analysis."""
     
     COLOR_SPACES = {
-        "BGR": cv2.COLOR_BGR2BGR,  # No conversion
-        "RGB": cv2.COLOR_BGR2RGB,
-        "HSV": cv2.COLOR_BGR2HSV,
-        "LAB": cv2.COLOR_BGR2LAB,
-        "YUV": cv2.COLOR_BGR2YUV,
-        "YCrCb": cv2.COLOR_BGR2YCrCb,
-        "GRAY": cv2.COLOR_BGR2GRAY
+        "BGR": {
+            "code": None,  # No conversion needed
+            "channels": ["B", "G", "R"]
+        },
+        "RGB": {
+            "code": cv2.COLOR_BGR2RGB,
+            "channels": ["R", "G", "B"]
+        },
+        "HSV": {
+            "code": cv2.COLOR_BGR2HSV,
+            "channels": ["H", "S", "V"]
+        },
+        "LAB": {
+            "code": cv2.COLOR_BGR2LAB,
+            "channels": ["L", "A", "B"]
+        },
+        "YUV": {
+            "code": cv2.COLOR_BGR2YUV,
+            "channels": ["Y", "U", "V"]
+        },
+        "YCrCb": {
+            "code": cv2.COLOR_BGR2YCrCb,
+            "channels": ["Y", "Cr", "Cb"]
+        }
     }
     
     def __init__(self):
@@ -24,12 +43,11 @@ class ColorProcessor(BaseImageProcessor):
         """Initialize color processor."""
         pass  # No initialization needed
     
-    def get_supported_color_spaces(self) -> Dict[str, int]:
+    def get_supported_color_spaces(self) -> Dict[str, Dict[str, Any]]:
         """Return supported color spaces."""
         return self.COLOR_SPACES.copy()
     
-    def process(self, image: np.ndarray, target_space: str = "BGR", 
-                analyze: bool = False) -> Dict[str, Any]:
+    def process(self, image: np.ndarray, target_space: str = "BGR", analyze: bool = False) -> Dict[str, Any]:
         """Process image color space and analyze color properties.
         
         Args:
@@ -40,66 +58,86 @@ class ColorProcessor(BaseImageProcessor):
         Returns:
             Dictionary containing processed image and metrics
         """
-        try:
-            self.validate_input(image)
-            result = {}
+        # Input validation
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Input must be a numpy array")
+        if len(image.shape) != 3 or image.shape[2] != 3:
+            raise ValueError("Input must be a 3-channel color image")
+        if image.dtype != np.uint8:
+            raise ValueError("Input must be an 8-bit image")
+        self.validate_input(image)
+        
+        result = {}
+        
+        # Convert color space if needed
+        if target_space != self._current_color_space:
+            if target_space not in self.COLOR_SPACES:
+                raise ValueError(f"Unsupported color space: {target_space}")
             
-            # Convert color space if needed
-            if target_space != self._current_color_space:
-                if target_space not in self.COLOR_SPACES:
-                    raise ValueError(f"Unsupported color space: {target_space}")
-                
-                # Convert to target space
-                if target_space == "BGR":
-                    # Convert back to BGR from current space
-                    inverse_conversion = getattr(cv2, f"COLOR_{self._current_color_space}2BGR")
-                    processed = cv2.cvtColor(image, inverse_conversion)
-                else:
-                    conversion_code = self.COLOR_SPACES[target_space]
-                    processed = cv2.cvtColor(image, conversion_code)
-                
-                self._current_color_space = target_space
+            # Convert to target space
+            if target_space == "BGR":
+                # Convert back to BGR from current space
+                inverse_conversion = getattr(cv2, f"COLOR_{self._current_color_space}2BGR")
+                processed = cv2.cvtColor(image, inverse_conversion)
             else:
-                processed = image.copy()
+                conversion_code = self.COLOR_SPACES[target_space]["code"]
+                processed = cv2.cvtColor(image, conversion_code)
             
-            result["converted_image"] = processed
-            
-            # Perform color analysis if requested
-            if analyze:
-                result.update(self._analyze_colors(processed, target_space))
-            
-            return result
-            
-        except Exception as e:
-            self.log_error(e, "color processing")
-            return {"converted_image": image.copy()}
+            self._current_color_space = target_space
+        else:
+            processed = image.copy()
+        
+        # Split channels
+        channels = cv2.split(processed)
+        channel_names = self.COLOR_SPACES[self._current_color_space]["channels"]
+        
+        result.update({
+            "converted_image": processed,
+            "color_space": self._current_color_space,
+            "channels": dict(zip(channel_names, channels))
+        })
+        
+        # Perform color analysis if requested
+        if analyze:
+            result.update(self._analyze_colors(processed))
+        
+        return result
     
-    def _analyze_colors(self, image: np.ndarray, color_space: str) -> Dict[str, Any]:
+    def _analyze_colors(self, image: np.ndarray) -> Dict[str, Any]:
         """Analyze color properties of the image."""
         try:
             metrics = {}
+            channels = cv2.split(image)
+            channel_names = self.COLOR_SPACES[self._current_color_space]["channels"]
             
-            # Calculate color distribution
-            if color_space in ["BGR", "RGB"]:
-                channels = ["Blue", "Green", "Red"] if color_space == "BGR" else ["Red", "Green", "Blue"]
-                for i, channel in enumerate(channels):
-                    hist = cv2.calcHist([image], [i], None, [256], [0, 256])
-                    metrics[f"{channel}_Mean"] = float(np.mean(image[:, :, i]))
-                    metrics[f"{channel}_Std"] = float(np.std(image[:, :, i]))
-                    metrics[f"{channel}_Distribution"] = hist.flatten().tolist()
+            # Calculate histograms
+            histograms = {}
+            for i, channel in enumerate(channel_names):
+                hist = cv2.calcHist([image], [i], None, [256], [0, 256])
+                histograms[channel] = hist.flatten().tolist()
+            metrics["histograms"] = histograms
+            
+            # Calculate statistics
+            stats = {}
+            for i, channel in enumerate(channel_names):
+                channel_data = channels[i]
+                stats[channel] = {
+                    "mean": float(np.mean(channel_data)),
+                    "std": float(np.std(channel_data)),
+                    "min": float(np.min(channel_data)),
+                    "max": float(np.max(channel_data)),
+                    "median": float(np.median(channel_data))
+                }
+            metrics["statistics"] = stats
             
             # Calculate color correlation
-            if color_space in ["BGR", "RGB"]:
-                correlations = self._calculate_color_correlation(image)
-                metrics["Color_Correlations"] = correlations
-            
-            # Calculate color moments
-            moments = self._calculate_color_moments(image)
-            metrics["Color_Moments"] = moments
-            
-            # Calculate dominant colors
-            dominant_colors = self._find_dominant_colors(image, n_colors=5)
-            metrics["Dominant_Colors"] = dominant_colors
+            correlations = {}
+            for i in range(len(channels)):
+                for j in range(i + 1, len(channels)):
+                    key = f"{channel_names[i]}-{channel_names[j]}"
+                    corr = float(np.corrcoef(channels[i].flatten(), channels[j].flatten())[0, 1])
+                    correlations[key] = corr
+            metrics["correlation"] = correlations
             
             return metrics
             
@@ -131,14 +169,12 @@ class ColorProcessor(BaseImageProcessor):
         try:
             moments = {}
             
-            for i, channel in enumerate(["First", "Second", "Third"]):
-                pixels = image[:, :, i].flatten()
-                
+            for i, channel in enumerate(self.COLOR_SPACES[self._current_color_space]["channels"]):
+                pixels = image[:, :, i].astype(float)
                 mean = float(np.mean(pixels))
                 std = float(np.std(pixels))
-                skewness = float(np.mean(((pixels - mean) / std) ** 3)) if std != 0 else 0
-                kurtosis = float(np.mean(((pixels - mean) / std) ** 4)) if std != 0 else 0
-                
+                skewness = float(skew(pixels.flatten()))
+                kurtosis = float(kurtosis(pixels.flatten()))
                 moments[channel] = [mean, std, skewness, kurtosis]
             
             return moments
@@ -154,30 +190,11 @@ class ColorProcessor(BaseImageProcessor):
     def _find_dominant_colors(self, image: np.ndarray, n_colors: int = 5) -> List[List[int]]:
         """Find dominant colors using k-means clustering."""
         try:
-            # Reshape image
             pixels = image.reshape(-1, 3)
-            
-            # Convert to float32
-            pixels = np.float32(pixels)
-            
-            # Define criteria
-            criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.2)
-            
-            # Apply k-means
-            _, labels, centers = cv2.kmeans(pixels, n_colors, None, criteria, 10, 
-                                          cv2.KMEANS_RANDOM_CENTERS)
-            
-            # Convert centers to integers
-            centers = np.uint8(centers)
-            
-            # Count occurrences of each label
-            unique_labels, counts = np.unique(labels, return_counts=True)
-            
-            # Sort colors by frequency
-            sorted_indices = np.argsort(-counts)
-            sorted_colors = centers[sorted_indices].tolist()
-            
-            return sorted_colors
+            kmeans = KMeans(n_clusters=n_colors, random_state=42)
+            kmeans.fit(pixels)
+            colors = kmeans.cluster_centers_.astype(int)
+            return colors.tolist()
             
         except Exception as e:
             self.log_error(e, "dominant colors")

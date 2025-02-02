@@ -1,0 +1,55 @@
+// Proje Yapısı
+digraph project_structure {
+	rankdir=TB
+	graph [fontname=Arial nodesep=0.5 pad=0.5 ranksep=0.5]
+	node [fillcolor=lightblue fontname=Arial margin=0.3 shape=folder style=filled]
+	root [label=multimedia_benchmark]
+	image [label=image]
+	video [label=video]
+	tests [label=tests]
+	image_proc [label=processors]
+	video_proc [label=processors]
+	root -> image
+	root -> video
+	root -> tests
+	image -> image_proc
+	video -> video_proc
+	subgraph cluster_python {
+		rank=same
+		node [fillcolor=lightgreen shape=file]
+		color_proc [label="color_processor.py"]
+		metric_proc [label="metric_processor.py"]
+		video_proc_py [label="video_processor.py"]
+	}
+	subgraph cluster_tests {
+		rank=same
+		node [fillcolor=lightgreen shape=file]
+		test_color [label="test_color_processor.py"]
+		test_video [label="test_video_processor.py"]
+		test_metric [label="test_metric_processor.py"]
+		test_main [label="test_main.py"]
+	}
+	image_proc -> color_proc
+	image_proc -> metric_proc
+	video_proc -> video_proc_py
+	tests -> test_color
+	tests -> test_video
+	tests -> test_metric
+	tests -> test_main
+	root -> main_py
+	root -> visualization_py
+	root -> run_tests_py
+	root -> requirements_txt
+	root -> setup_py
+	root -> README_md
+	subgraph cluster_root {
+		rank=same
+		node [fillcolor=lightpink shape=file]
+		main_py [label="main.py"]
+		visualization_py [label="visualization.py"]
+		run_tests_py [label="run_tests.py"]
+		requirements_txt [label="requirements.txt"]
+		setup_py [label="setup.py"]
+		README_md [label="README.md"]
+	}
+}
